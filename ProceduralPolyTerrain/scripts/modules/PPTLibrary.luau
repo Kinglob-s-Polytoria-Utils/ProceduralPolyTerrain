@@ -30,6 +30,11 @@ local Noise: typeof(math.noise) = math.noise
 local VecCreate: typeof(vector.create) = vector.create
 local Vec3New: typeof(Vector3.New) = Vector3.New -- temporary
 
+local function GetIndex(x: number, z: number, chunksize: number): number
+    local gridsize: number = chunksize + 1
+    return x * gridsize + z + 1
+end
+
 function PPT.SetConfig(Config: PPTConfig): nil
     PPT.Config = Config
 end
@@ -48,7 +53,7 @@ local function WorldgenNoise2D(
 
 local Result: number = 0
 local MaxAmplitude: number = 0
-for CurrOctave = 0, Octaves do
+for CurrOctave = 1, Octaves do
     Result += Noise(x * Frequency, z * Frequency, Seed) * Amplitude
     MaxAmplitude += Amplitude
     Frequency *= Lacunarity
@@ -62,17 +67,16 @@ function PPT.GenerateChunk(seed: number, ChunkCoordinate: vector): ChunkData
     local ChunkSize: number = PPT.Config.ChunkSize
     local Chunk: ChunkData = {
         ChunkPosition = ChunkCoordinate,
-        VertexCoordinates = table.create(ChunkSize * ChunkSize)
+        VertexCoordinates = table.create((ChunkSize + 1) * (ChunkSize + 1))
     }
 
-    for x: number = 1, ChunkSize - 1 do
-        for z: number = 1, ChunkSize - 1 do
-            local noise: number = WorldgenNoise2D(Config.Frequency, Config.Amplitude, Config.Scale, Config.Octaves, Config.Persistence, Config.Lacunarity, seed, x, z)
+    for x: number = 0, ChunkSize do
+        local worldx: number = ChunkCoordinate.x * ChunkSize + x
+        for z: number = 0, ChunkSize do
+            local worldz: number = ChunkCoordinate.y * ChunkSize + z
+            local noise: number = WorldgenNoise2D(Config.Frequency, Config.Amplitude, Config.Scale, Config.Octaves, Config.Persistence, Config.Lacunarity, seed, worldx, worldz)
             
-            Chunk.VertexCoordinates[(x - 1) * ChunkSize + z]      = VecCreate(x - 1, noise, z)
-            Chunk.VertexCoordinates[x * ChunkSize + z]            = VecCreate(x, noise, z)
-            Chunk.VertexCoordinates[(x - 1) * ChunkSize + z + 1]  = VecCreate(x - 1, noise, z + 1)
-            Chunk.VertexCoordinates[x * ChunkSize + z + 1]        = VecCreate(x, noise, z + 1)
+            Chunk.VertexCoordinates[GetIndex(x, z, ChunkSize)] = VecCreate(worldx, noise, worldz)
         end
     end
 
@@ -83,38 +87,41 @@ function PPT.RenderChunk(Chunk: ChunkData): nil
     local ChunkSize: number = PPT.Config.ChunkSize
     local ChunkCoordinates: vector = Chunk.ChunkPosition
     local VertexCoordinates: {vector} = Chunk.VertexCoordinates
-    local TriangleBuffer: {Part} = table.create(#VertexCoordinates / 4)
-    local vec_idx: number = 1
-    while vec_idx < #VertexCoordinates do
-        -- sample by quads
-        local vec1: vector = ChunkCoordinates * ChunkSize + VertexCoordinates[vec_idx]
-        local vec2: vector = ChunkCoordinates * ChunkSize + VertexCoordinates[vec_idx + 1]
-        local vec3: vector = ChunkCoordinates * ChunkSize + VertexCoordinates[vec_idx + 2]
-        local vec4: vector = ChunkCoordinates * ChunkSize + VertexCoordinates[vec_idx + 3]
+    local TriangleBuffer: {Part} = table.create(#VertexCoordinates)
+    for x: number = 0, ChunkSize - 1 do
+        for z: number = 0, ChunkSize - 1 do
+            local po1: vector = VertexCoordinates[GetIndex(x, z, ChunkSize)]
+            local po2: vector = VertexCoordinates[GetIndex(x + 1, z, ChunkSize)]
+            local po3: vector = VertexCoordinates[GetIndex(x, z + 1, ChunkSize)]
+            local po4: vector = VertexCoordinates[GetIndex(x + 1, z + 1, ChunkSize)]
 
-        -- currently, this is a bit slow until i rewrite triangle3d.luau to use the native vector library
-        -- and also object pooling
-        local tri1_1: Part = Triangle3D.NewTriangle(
-            Vec3New(vec1.x, vec1.y, vec1.z),
-            Vec3New(vec2.x, vec2.y, vec2.z),
-            Vec3New(vec4.x, vec4.y, vec4.z)
-        )
+            local tri1: Part = Triangle3D.NewTriangle()
+            local tri2: Part = Triangle3D.NewTriangle()
 
-        local tri1_2: Part = Triangle3D.NewTriangle(
-            Vec3New(vec1.x, vec1.y, vec1.z),
-            Vec3New(vec4.x, vec4.y, vec4.z),
-            Vec3New(vec3.x, vec3.y, vec3.z)
-        )
+            Triangle3D.SplitTriangle(
+                tri1,
+                tri2, 
+                Vec3New(po1.x, po1.y, po1.z),
+                Vec3New(po2.x, po2.y, po2.z), 
+                Vec3New(po4.x, po4.y, po4.z)
+            )
 
-        Triangle3D.SplitTriangle(
-            tri1_1, 
-            tri1_2, 
-            Vec3New(vec1.x, vec1.y, vec1.z), 
-            Vec3New(vec2.x, vec2.y, vec2.z), 
-            Vec3New(vec3.x, vec3.y, vec3.z)); 
-        tri1_1.Parent = Environment
-        tri1_2.Parent = Environment
-        vec_idx += 4
+            local tri3: Part = Triangle3D.NewTriangle()
+            local tri4: Part = Triangle3D.NewTriangle()
+
+            Triangle3D.SplitTriangle(
+                tri3,
+                tri4, 
+                Vec3New(po1.x, po1.y, po1.z),
+                Vec3New(po4.x, po4.y, po4.z), 
+                Vec3New(po3.x, po3.y, po3.z)
+            )
+            
+            tri1.Parent = Environment
+            tri2.Parent = Environment
+            tri3.Parent = Environment
+            tri4.Parent = Environment
+        end
     end
 end
 
