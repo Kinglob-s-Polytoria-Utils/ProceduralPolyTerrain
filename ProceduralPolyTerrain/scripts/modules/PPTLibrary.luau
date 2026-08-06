@@ -8,8 +8,13 @@ export type ChunkData = {
     Chunk size is the length of a single chunk in
     polytoria units.
     
-    Point interval is a multiplier meant to specify
-    the rate at which points are stored in a chunk.
+    Point interval is a value for how many points are
+		created per length units.
+
+		For example:
+		ChunkSize = 16
+		PointIntreval = 4
+		Each row will have 4 points.
 --]]
 export type PPTConfig = {
     Frequency: number,
@@ -70,9 +75,11 @@ function PPT.GenerateChunk(seed: number, ChunkCoordinate: vector): ChunkData
         VertexCoordinates = table.create((ChunkSize + 1) * (ChunkSize + 1))
     }
 
+		-- flatten this loop when possible
     for x: number = 0, ChunkSize do
         local worldx: number = ChunkCoordinate.x * ChunkSize + x
         for z: number = 0, ChunkSize do
+						if (x % Config.PointInterval ~= 0) or (z % Config.PointInterval ~= 0) then continue end
             local worldz: number = ChunkCoordinate.y * ChunkSize + z
             local noise: number = WorldgenNoise2D(Config.Frequency, Config.Amplitude, Config.Scale, Config.Octaves, Config.Persistence, Config.Lacunarity, seed, worldx, worldz)
             

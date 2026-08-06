@@ -8,7 +8,7 @@ local config: PPTConfig = {
     Persistence = 0.5,
     Lacunarity = 2,
     ChunkSize = 16,
-    PointInterval = 0.25
+    PointInterval = 4
 } :: PPTConfig
 PPTLibrary.SetConfig(config)
 local chunk: ChunkData = PPTLibrary.GenerateChunk(12932131, vector.create(0, 0))
