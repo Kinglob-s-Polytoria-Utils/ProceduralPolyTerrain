@@ -1,15 +1,28 @@
-local PPTLibrary: typeof(require(ScriptService.PPTLibrary)) = require(ScriptService.PPTLibrary)
+local PPTLibrary: typeof(require(Hidden.PPTLibrary)) = require(Hidden.PPTLibrary)
+local bus: NetworkEvent = Hidden.PPTLibrary.ChunkDataBus
 
 local config: PPTConfig = {
-    Frequency = 0.03,
+    Frequency = 0.006,
     Amplitude = 1,
-    Scale = 20,
-    Octaves = 4,
+    Scale = 80,
+    Octaves = 5,
     Persistence = 0.5,
     Lacunarity = 2,
     ChunkSize = 16,
-    PointInterval = 4
+    PointInterval = 8,
+    RenderDistance = 0
 } :: PPTConfig
+
 PPTLibrary.SetConfig(config)
-local chunk: ChunkData = PPTLibrary.GenerateChunk(12932131, vector.create(0, 0))
-PPTLibrary.RenderChunk(chunk)
+wait(5)
+for x = 0, 16 do
+    local chunks: {ChunkData} = {}
+    for z = 0, 16 do
+        local chunk: ChunkData = PPTLibrary.GenerateChunk(111, vector.create(x, z))
+        table.insert(chunks, chunk)
+        wait(0.025)
+    end
+    local msg: NetMessage = NetMessage.New()
+    msg:AddString("chunks", PPTLibrary.EncodeBatch(chunks))
+    bus:InvokeClients(msg)
+end
