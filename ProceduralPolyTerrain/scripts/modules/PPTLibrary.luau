@@ -19,25 +19,26 @@ export type ChunkData = {
 		Each row will have 4 points.
 --]]
 export type PPTConfig = {
-    Frequency: number,
-    Amplitude: number,
-    Scale: number,
-    Octaves: number,
-    Persistence: number,
-    Lacunarity: number,
-    ChunkSize: number,
-    PointInterval: number,
-    RenderDistance: number
+    Frequency: number, -- server
+    Amplitude: number, -- server
+    Scale: number, -- server
+    Octaves: number, -- server
+    Persistence: number, -- server
+    Lacunarity: number, -- server
+    ChunkSize: number, -- shared
+    PointInterval: number, -- shared
 }
 
 local PPT = {}
-PPT.Config = {} :: PPTConfig
+local ConfigServer = {} :: PPTConfig
 
 local Triangle3D: typeof(require(script.Triangle3D)) = require(script.Triangle3D)
 local Basin: typeof(require(script.Basin)) = require(script.Basin)
 local Triangle: Part = script.Triangle
-local ClientRenderCall: PTSignal = script.ClientRenderCall
+local ClientRenderCall: BindableEvent = script.ClientRenderCall
+local ChangeRenderDistance: BindableEvent = script.ChangeRenderDistance
 local ChunkDataBus: NetworkEvent = script.ChunkDataBus
+local SharedConfigBus: NetworkEvent = script.SharedConfigBus
 
 local Noise: typeof(math.noise) = math.noise
 local VecCreate: typeof(vector.create) = vector.create
@@ -46,8 +47,21 @@ local function GetIndex(x: number, z: number, stepsperrow: number): number
     return x * stepsperrow + z + 1
 end
 
+--[[
+    Server only function for setting shared & server config.
+--]]
 function PPT.SetConfig(Config: PPTConfig): nil
-    PPT.Config = Config
+    if Players.LocalPlayer then return end
+    ConfigServer = Config
+end
+
+
+--[[
+    Requests the currently set shared config and returns it as
+    a table.
+--]]
+function PPT.RequestSharedConfig(): {number}
+    SharedConfigBus.InvokeServer()
 end
 
 local function WorldgenNoise2D(
@@ -73,8 +87,11 @@ end
 return Result / MaxAmplitude * Scale
 end
 
+--[[
+    Generates chunk data with a provided seed and chunk coordinate.
+--]]
 function PPT.GenerateChunk(seed: number, ChunkCoordinate: vector): ChunkData
-    local Config = PPT.Config
+    local Config = ConfigServer
     local ChunkSize: number = Config.ChunkSize
     local PointInterval: number = Config.PointInterval
     local stepsPerRow: number = (ChunkSize / PointInterval) + 1
@@ -105,9 +122,23 @@ function PPT.GenerateChunk(seed: number, ChunkCoordinate: vector): ChunkData
     return Chunk
 end
 
-function PPT.RenderChunk(Chunk: ChunkData, TrianglePool: BasinClass): nil
+--[[
+    Renders the input chunk using triangles from the provided
+    triangle pool.
+
+    SharedConfig is required if you're running this on the client (aka; by default)
+    isClient is set to true by default, as server-side rendering is not expected.
+--]]
+function PPT.RenderChunk(Chunk: ChunkData, TrianglePool: BasinClass, SharedConfig: {number}?, isClient: boolean?): nil
+    if isClient == nil then isClient = true end
     Chunk.isRendered = true
-    local Config: PPTConfig = PPT.Config
+    local Config: {number} | PPTConfig
+    if isClient then
+        Config = SharedConfig
+    else
+        if Players.LocalPlayer then return end
+        Config = ConfigServer
+    end
     local ChunkSize: number = Config.ChunkSize
     local PointInterval: number = Config.PointInterval
     local stepsPerRow: number = (ChunkSize / PointInterval) + 1
@@ -155,6 +186,10 @@ function PPT.RenderChunk(Chunk: ChunkData, TrianglePool: BasinClass): nil
     end
 end
 
+--[[
+    Unrenders a chunk by emptying its triangles and
+    sets the rendered state to false.
+--]]
 function PPT.UnrenderChunk(Chunk: ChunkData): nil
     for _, obj: ObjectClass in ipairs(Chunk.PooledObjects) do
         obj:Push()
@@ -163,6 +198,10 @@ function PPT.UnrenderChunk(Chunk: ChunkData): nil
     Chunk.isRendered = false
 end
 
+--[[
+    Encodes the provided chunkdata into a string.
+    Can be decoded back into chunkdata using PPT.Decode.
+--]]
 function PPT.Encode(Chunk: ChunkData): string
     local vertParts: {string} = table.create(#Chunk.VertexCoordinates * 3)
     for i, v in ipairs(Chunk.VertexCoordinates) do
@@ -177,6 +216,10 @@ function PPT.Encode(Chunk: ChunkData): string
     })
 end
 
+--[[
+    Encodes the provided chunkdata string into chunkdata.
+    Can be encoded back into string using PPT.Encode.
+--]]
 function PPT.Decode(ChunkString: string): ChunkData
     local ChunkJson = json.parse(ChunkString)
     local parts: {string} = string.split(ChunkJson.VertexCoordinates, "_")
@@ -192,6 +235,10 @@ function PPT.Decode(ChunkString: string): ChunkData
     }
 end
 
+--[[
+    Batch version of PPT.Encode.
+    Input a table of chunks to get a single string.
+--]]
 function PPT.EncodeBatch(Chunks: {ChunkData}): string
     local batch: {string} = table.create(#Chunks)
     for _, chunk: ChunkData in ipairs(Chunks) do
@@ -201,6 +248,10 @@ function PPT.EncodeBatch(Chunks: {ChunkData}): string
     return json.serialize(batch)
 end
 
+--[[
+    Batch version of PPT.Decode.
+    Input a chunk batch string from PPT.EncodeBatch to get a table of chunks.
+--]]
 function PPT.DecodeBatch(ChunkBatchString: string): {ChunkData}
     local batch: {string} = json.parse(ChunkBatchString)
     local decoded: {ChunkData} = table.create(#batch)
@@ -221,8 +272,11 @@ end
 
     InitialTriAmount is the number of pre-allocated triangles
     you want the client to have.
+
+    RenderDistance is the number of chunks you want the runtime to render.
+    RenderDistance can be updated via PPT.UpdateRenderDistance
 --]]
-function PPT.EnableClientRuntime(Tickrate: number, InitialTriAmount: number): nil
+function PPT.EnableClientRuntime(Tickrate: number, InitialTriAmount: number, RenderDistance: number): nil
     if not Players.LocalPlayer then return end
     local Player: Player = Players.LocalPlayer
 
@@ -231,22 +285,72 @@ function PPT.EnableClientRuntime(Tickrate: number, InitialTriAmount: number): ni
     local TrianglePool: BasinClass, PoolSuccess: boolean = Basin.New(Triangle, InitialTriAmount, false);
     if not PoolSuccess then return end
 
-    ChunkDataBus.InvokedClient:Connect(function(ChunkBatchMessage: NetMessage)
+    ChunkDataBus.InvokedClient:Connect(function(ChunkBatchMessage: NetMessage): nil
         for _: string, chunk: ChunkData in ipairs(PPT.DecodeBatch(ChunkBatchMessage:GetString("chunks"))) do
             local key = chunk.ChunkPosition.x .. "," .. chunk.ChunkPosition.y
             ChunkDataStorage[key] = chunk
         end
     end)
 
-    local ChunkSize: number = PPT.Config.ChunkSize
+    local Config: {number} = {}
+    SharedConfigBus.InvokedClient:Connect(function(msg: NetMessage)
+        Config.PointInterval = msg:GetNumber("PointInterval")
+        Config.ChunkSize = msg:GetNumber("ChunkSize")
+    end)
+
+    ChangeRenderDistance.Invoked:Connect(function(NewDist: number): nil
+        RenderDistance = NewDist
+    end)
+
     local elapsed_dt: number = 0
     Hooks.PreRendered:Connect(function(DeltaTime: number)
         elapsed_dt += DeltaTime
         if elapsed_dt < 1/Tickrate then return end
         elapsed_dt = 0
+
+        if not Config or not Config.ChunkSize then 
+            PPT.RequestSharedConfig()
+            return
+        end
+
         for _, chunk: ChunkData in pairs(ChunkDataStorage) do
             if chunk.isRendered then continue end
-            PPT.RenderChunk(chunk, TrianglePool)
+            PPT.RenderChunk(chunk, TrianglePool, Config, true)
+        end
+    end)
+end
+
+--[[
+    Update render distance.
+    Only runnable on client.
+]]--
+function PPT.UpdateRenderDistance(RenderDistance: number): nil
+    if not Players.LocalPlayer then return end
+    ChangeRenderDistance.Invoke(RenderDistance)
+end
+
+function PPT.StartServerRuntime(Tickrate: number): nil
+    if Players.LocalPlayer then return end
+    SharedConfigBus.InvokedServer:Connect(function(sender: Player, msg: NetMessage)
+        local returnmsg: NetMessage = NetMessage.New()
+        returnmsg:AddNumber("PointInterval", ConfigServer.PointInterval)
+        returnmsg:AddNumber("ChunkSize", ConfigServer.ChunkSize)
+        SharedConfigBus.InvokeClient(returnmsg, sender)
+    end)
+
+    local temp: PPTConfig = ConfigServer
+    local elapsed_dt: number = 0
+    local UpdateMsg: NetMessage = NetMessage.New()
+    Hooks.PreRendered:Connect(function(DeltaTime: number)
+        elapsed_dt += DeltaTime
+        if elapsed_dt < 1/Tickrate then return end
+        elapsed_dt = 0
+
+        if ConfigServer ~= temp then
+            temp = ConfigServer
+            UpdateMsg:AddNumber("PointInterval", ConfigServer.PointInterval)
+            UpdateMsg:AddNumber("ChunkSize", ConfigServer.ChunkSize)
+            SharedConfigBus.InvokeClients(UpdateMsg)
         end
     end)
 end
