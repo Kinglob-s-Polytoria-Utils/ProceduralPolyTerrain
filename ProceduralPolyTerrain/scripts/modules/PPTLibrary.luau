@@ -25,6 +25,7 @@ export type PPTConfig = {
     Octaves: number, -- server
     Persistence: number, -- server
     Lacunarity: number, -- server
+    Seed: number,
     ChunkSize: number, -- shared
     PointInterval: number, -- shared
 }
@@ -42,6 +43,9 @@ local SharedConfigBus: NetworkEvent = script.SharedConfigBus
 
 local Noise: typeof(math.noise) = math.noise
 local VecCreate: typeof(vector.create) = vector.create
+local TableInsert: typeof(table.insert) = table.insert
+local TableCreate: typeof(table.create) = table.create
+local TableClear: typeof(table.clear) = table.clear
 
 local function GetIndex(x: number, z: number, stepsperrow: number): number
     return x * stepsperrow + z + 1
@@ -89,16 +93,18 @@ end
 
 --[[
     Generates chunk data with a provided seed and chunk coordinate.
+    Server use only.
 --]]
-function PPT.GenerateChunk(seed: number, ChunkCoordinate: vector): ChunkData
+function PPT.GenerateChunk(ChunkCoordinate: vector): ChunkData
     local Config = ConfigServer
     local ChunkSize: number = Config.ChunkSize
     local PointInterval: number = Config.PointInterval
+    local Seed: number = Config.Seed
     local stepsPerRow: number = (ChunkSize / PointInterval) + 1
 
     local Chunk: ChunkData = {
         ChunkPosition = ChunkCoordinate,
-        VertexCoordinates = table.create(stepsPerRow * stepsPerRow),
+        VertexCoordinates = TableCreate(stepsPerRow * stepsPerRow),
         PooledObjects = {},
         isRendered = false
     }
@@ -112,7 +118,7 @@ function PPT.GenerateChunk(seed: number, ChunkCoordinate: vector): ChunkData
             if z % PointInterval ~= 0 then continue end
             local worldz: number = ChunkCoordinate.y * ChunkSize + z
             local zi: number = z / PointInterval
-            local noise: number = WorldgenNoise2D(Config.Frequency, Config.Amplitude, Config.Scale, Config.Octaves, Config.Persistence, Config.Lacunarity, seed, worldx, worldz)
+            local noise: number = WorldgenNoise2D(Config.Frequency, Config.Amplitude, Config.Scale, Config.Octaves, Config.Persistence, Config.Lacunarity, Seed, worldx, worldz)
             local y: number = math.pow(math.abs(noise) * 1.2, 1)
 
             Chunk.VertexCoordinates[GetIndex(xi, zi, stepsPerRow)] = VecCreate(worldx, y, worldz)
@@ -166,7 +172,10 @@ function PPT.RenderChunk(Chunk: ChunkData, TrianglePool: BasinClass, SharedConfi
                 print("failed to pull triangles for chunk")
                 TrianglePool:Reserve(#TrianglePool.Pool + ChunkSize * ChunkSize)
                 triangles, success = TrianglePool:Pull(4)
-                if not success then continue end
+                if not success then 
+                    Chunk.isRendered = false
+                    continue
+                end
             end
             for _, obj: ObjectClass in ipairs(triangles) do Chunk.PooledObjects[#Chunk.PooledObjects + 1] = obj end
 
@@ -203,7 +212,7 @@ end
     Can be decoded back into chunkdata using PPT.Decode.
 --]]
 function PPT.Encode(Chunk: ChunkData): string
-    local vertParts: {string} = table.create(#Chunk.VertexCoordinates * 3)
+    local vertParts: {string} = TableCreate(#Chunk.VertexCoordinates * 3)
     for i, v in ipairs(Chunk.VertexCoordinates) do
         vertParts[(i-1)*3 + 1] = tostring(v.x)
         vertParts[(i-1)*3 + 2] = tostring(v.y)
@@ -223,7 +232,7 @@ end
 function PPT.Decode(ChunkString: string): ChunkData
     local ChunkJson = json.parse(ChunkString)
     local parts: {string} = string.split(ChunkJson.VertexCoordinates, "_")
-    local verts: {vector} = table.create(#parts / 3)
+    local verts: {vector} = TableCreate(#parts / 3)
     for i = 1, #parts, 3 do
         verts[(i - 1) / 3 + 1] = VecCreate(tonumber(parts[i]), tonumber(parts[i+1]), tonumber(parts[i+2]))
     end
@@ -240,10 +249,10 @@ end
     Input a table of chunks to get a single string.
 --]]
 function PPT.EncodeBatch(Chunks: {ChunkData}): string
-    local batch: {string} = table.create(#Chunks)
+    local batch: {string} = TableCreate(#Chunks)
     for _, chunk: ChunkData in ipairs(Chunks) do
         local chunk_str: string = PPT.Encode(chunk)
-        table.insert(batch, chunk_str)
+        TableInsert(batch, chunk_str)
     end
     return json.serialize(batch)
 end
@@ -254,10 +263,10 @@ end
 --]]
 function PPT.DecodeBatch(ChunkBatchString: string): {ChunkData}
     local batch: {string} = json.parse(ChunkBatchString)
-    local decoded: {ChunkData} = table.create(#batch)
+    local decoded: {ChunkData} = TableCreate(#batch)
     for _, chunk_str: string in ipairs(batch) do
         local chunk: ChunkData = PPT.Decode(chunk_str)
-        table.insert(decoded, chunk)
+        TableInsert(decoded, chunk)
     end
     return decoded
 end
@@ -286,6 +295,7 @@ function PPT.EnableClientRuntime(Tickrate: number, InitialTriAmount: number, Ren
     if not PoolSuccess then return end
 
     ChunkDataBus.InvokedClient:Connect(function(ChunkBatchMessage: NetMessage): nil
+        print("got chunks")
         for _: string, chunk: ChunkData in ipairs(PPT.DecodeBatch(ChunkBatchMessage:GetString("chunks"))) do
             local key = chunk.ChunkPosition.x .. "," .. chunk.ChunkPosition.y
             ChunkDataStorage[key] = chunk
@@ -321,6 +331,22 @@ function PPT.EnableClientRuntime(Tickrate: number, InitialTriAmount: number, Ren
 end
 
 --[[
+    Request chunks from the server. Only usable on the client.
+    ChunkCoordinates must be a table of native luau vectors.
+--]]
+function PPT.RequestChunks(ChunkCoordinates: {vector}): nil
+    if not Players.LocalPlayer then return end
+    local req: NetMessage = NetMessage.New()
+    local chunkcoordstr: {string} = TableCreate(#ChunkCoordinates)
+    for idx: number, vec: vector in ipairs(ChunkCoordinates) do
+        chunkcoordstr[idx] = tostring(vec)
+    end
+
+    req:AddString("ChunkCoordinates", table.concat(chunkcoordstr, "_"))
+    ChunkDataBus.InvokeServer(req)
+end
+
+--[[
     Update render distance.
     Only runnable on client.
 ]]--
@@ -336,6 +362,27 @@ function PPT.StartServerRuntime(Tickrate: number): nil
         returnmsg:AddNumber("PointInterval", ConfigServer.PointInterval)
         returnmsg:AddNumber("ChunkSize", ConfigServer.ChunkSize)
         SharedConfigBus.InvokeClient(returnmsg, sender)
+    end)
+
+    ChunkDataBus.InvokedServer:Connect(function(sender: Player, req: NetMessage)
+        print("got request")
+        local chunkcoordstr: {string} = string.split(req:GetString("ChunkCoordinates"), "_")
+
+        local chunkcoords: {vector} = TableCreate(#chunkcoordstr)
+        for idx: number, vecstr: string in ipairs(chunkcoordstr) do
+            local nums: {string} = string.split(vecstr, ",")
+            chunkcoords[idx] = VecCreate(tonumber(nums[1]), tonumber(nums[2]))
+        end
+
+        -- only send 2 chunks at once
+        local chunks: {ChunkData} = TableCreate(2)
+        for idx: number, vec: vector in ipairs(chunkcoords) do
+            chunks[idx] = PPT.GenerateChunk(vec)
+        end
+        local BatchMsg: NetMessage = NetMessage.New()
+        BatchMsg:AddString("chunks", PPT.EncodeBatch(chunks))
+        ChunkDataBus.InvokeClient(BatchMsg, sender)
+        
     end)
 
     local temp: PPTConfig = ConfigServer
