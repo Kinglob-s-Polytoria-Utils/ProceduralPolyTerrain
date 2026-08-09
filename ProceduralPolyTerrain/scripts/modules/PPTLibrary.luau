@@ -43,6 +43,7 @@ local SharedConfigBus: NetworkEvent = script.SharedConfigBus
 
 local Noise: typeof(math.noise) = math.noise
 local VecCreate: typeof(vector.create) = vector.create
+local Vec3New: typeof(Vector3.New) = Vector3.New
 local TableInsert: typeof(table.insert) = table.insert
 local TableCreate: typeof(table.create) = table.create
 local TableClear: typeof(table.clear) = table.clear
@@ -169,7 +170,7 @@ function PPT.RenderChunk(Chunk: ChunkData, TrianglePool: BasinClass, SharedConfi
                 if triangles and #triangles > 0 then
                     for _, obj: ObjectClass in ipairs(triangles) do obj:Push() end
                 end
-                print("failed to pull triangles for chunk")
+                print("[ PPT ] Failed to pull triangles for chunk!")
                 TrianglePool:Reserve(#TrianglePool.Pool + ChunkSize * ChunkSize)
                 triangles, success = TrianglePool:Pull(4)
                 if not success then 
@@ -204,6 +205,7 @@ function PPT.UnrenderChunk(Chunk: ChunkData): nil
         obj:Push()
     end
 
+    TableClear(Chunk.PooledObjects)
     Chunk.isRendered = false
 end
 
@@ -295,7 +297,6 @@ function PPT.EnableClientRuntime(Tickrate: number, InitialTriAmount: number, Ren
     if not PoolSuccess then return end
 
     ChunkDataBus.InvokedClient:Connect(function(ChunkBatchMessage: NetMessage): nil
-        print("got chunks")
         for _: string, chunk: ChunkData in ipairs(PPT.DecodeBatch(ChunkBatchMessage:GetString("chunks"))) do
             local key = chunk.ChunkPosition.x .. "," .. chunk.ChunkPosition.y
             ChunkDataStorage[key] = chunk
@@ -317,6 +318,7 @@ function PPT.EnableClientRuntime(Tickrate: number, InitialTriAmount: number, Ren
         elapsed_dt += DeltaTime
         if elapsed_dt < 1/Tickrate then return end
         elapsed_dt = 0
+        local playerpos: vector = VecCreate(Player.Position.X, 0, Player.Position.Z)
 
         if not Config or not Config.ChunkSize then 
             PPT.RequestSharedConfig()
@@ -324,7 +326,14 @@ function PPT.EnableClientRuntime(Tickrate: number, InitialTriAmount: number, Ren
         end
 
         for _, chunk: ChunkData in pairs(ChunkDataStorage) do
-            if chunk.isRendered then continue end
+            local chunkpos: vector = VecCreate(chunk.ChunkPosition.x, 0, chunk.ChunkPosition.y) * Config.ChunkSize
+            local outOfRange: boolean = vector.magnitude(playerpos - chunkpos) > RenderDistance * Config.ChunkSize
+            if chunk.isRendered then
+                if outOfRange then PPT.UnrenderChunk(chunk) end
+                continue
+            end
+            if outOfRange then continue end
+            
             PPT.RenderChunk(chunk, TrianglePool, Config, true)
         end
     end)
@@ -365,7 +374,6 @@ function PPT.StartServerRuntime(Tickrate: number): nil
     end)
 
     ChunkDataBus.InvokedServer:Connect(function(sender: Player, req: NetMessage)
-        print("got request")
         local chunkcoordstr: {string} = string.split(req:GetString("ChunkCoordinates"), "_")
 
         local chunkcoords: {vector} = TableCreate(#chunkcoordstr)
