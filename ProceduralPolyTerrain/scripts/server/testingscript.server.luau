@@ -1,4 +1,4 @@
-local PPTLibrary: typeof(require(Hidden.PPTLibrary)) = require(Hidden.PPTLibrary)
+local PPTServer: typeof(require(ScriptService.PPTServer)) = require(ScriptService.PPTServer)
 
 local config: PPTConfig = {
     Frequency = 0.006, -- server only
@@ -13,5 +13,5 @@ local config: PPTConfig = {
 } :: PPTConfig
 local tickrate: number = 20
 
-PPTLibrary.SetConfig(config)
-PPTLibrary.StartServerRuntime(tickrate)
+PPTServer.SetConfig(config)
+PPTServer.StartServerRuntime(tickrate)

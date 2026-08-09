@@ -31,19 +31,25 @@ export type PPTConfig = {
 }
 
 local PPT = {}
-local ConfigServer = {} :: PPTConfig
+local ModuleConfig: typeof(require(script.ClientConfig)) = require(script.ClientConfig)
+assert(ModuleConfig, "[ PPTClient ] Couldn't find ModuleConfig (ClientConfig)!")
 
-local Triangle3D: typeof(require(script.Triangle3D)) = require(script.Triangle3D)
-local Basin: typeof(require(script.Basin)) = require(script.Basin)
-local Triangle: Part = script.Triangle
-local ClientRenderCall: BindableEvent = script.ClientRenderCall
-local ChangeRenderDistance: BindableEvent = script.ChangeRenderDistance
-local ChunkDataBus: NetworkEvent = script.ChunkDataBus
-local SharedConfigBus: NetworkEvent = script.SharedConfigBus
+local Triangle3D: typeof(require(ModuleConfig.Triangle3DModule)) = require(ModuleConfig.Triangle3DModule)
+assert(Triangle3D, "[ PPTClient ] Couldn't find Triangle3D!")
+local Basin: typeof(require(ModuleConfig.BasinModule)) = require(ModuleConfig.BasinModule)
+assert(Basin, "[ PPTClient ] Couldn't find Basin!")
+
+local Triangle: Part = ModuleConfig.ClientTriangle
+assert(Triangle, "[ PPTClient ] Couldn't find template Triangle!")
+local ChangeRenderDistance: BindableEvent = ModuleConfig.ChangeRenderDistance
+assert(ChangeRenderDistance, "[ PPTClient ] Couldn't find ChangeRenderDistance!")
+local ChunkDataBus: NetworkEvent = ModuleConfig.ChunkDataBus
+assert(ChunkDataBus, "[ PPTClient ] Couldn't find ChunkDataBus!")
+local SharedConfigBus: NetworkEvent = ModuleConfig.SharedConfigBus
+assert(SharedConfigBus, "[ PPTClient ] Couldn't find SharedConfigBus!")
 
 local Noise: typeof(math.noise) = math.noise
 local VecCreate: typeof(vector.create) = vector.create
-local Vec3New: typeof(Vector3.New) = Vector3.New
 local TableInsert: typeof(table.insert) = table.insert
 local TableCreate: typeof(table.create) = table.create
 local TableClear: typeof(table.clear) = table.clear
