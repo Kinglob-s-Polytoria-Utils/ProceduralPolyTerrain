@@ -162,6 +162,7 @@ function PPT.StartServerRuntime(Tickrate: number): nil
         SharedConfigBus.InvokeClient(returnmsg, sender)
     end)
 
+		local CachedChunks: {ChunkData} = {}
     ChunkDataBus.InvokedServer:Connect(function(sender: Player, req: NetMessage)
         local chunkcoordstr: {string} = string.split(req:GetString("ChunkCoordinates"), "_")
 
@@ -174,12 +175,16 @@ function PPT.StartServerRuntime(Tickrate: number): nil
         -- only send 2 chunks at once
         local chunks: {ChunkData} = TableCreate(2)
         for idx: number, vec: vector in ipairs(chunkcoords) do
-            chunks[idx] = PPT.GenerateChunk(vec)
+						local key: string = tostring(vec.x) .. "," .. tostring(vec.y)
+            if not CachedChunks[key] then
+							local chunk = PPT.GenerateChunk(vec)
+							chunks[idx] = chunk
+							CachedChunks[key] = chunk
+						end
         end
         local BatchMsg: NetMessage = NetMessage.New()
         BatchMsg:AddString("chunks", PPT.EncodeBatch(chunks))
         ChunkDataBus.InvokeClient(BatchMsg, sender)
-        
     end)
 
     local temp: PPTConfig = ConfigServer

@@ -279,6 +279,11 @@ function PPT.DecodeBatch(ChunkBatchString: string): {ChunkData}
     return decoded
 end
 
+local function CalculateTriPoolSize(PointInterval: number, ChunkSize: number, RenderDistance: number): number
+	local chunktricount: number = (ChunkSize / PointInterval) / 3 * RenderDistance
+	return chunktricount
+end
+
 --[[
     Only runnable on the client.
     Handles culling, object pooling, and rendering for the client.
@@ -289,23 +294,26 @@ end
 
     InitialTriAmount is the number of pre-allocated triangles
     you want the client to have.
+		Setting triangle amount to less than 0 will dynamically make a pool
+		based off of the set render distance and triangle count for a single chunk.
 
     RenderDistance is the number of chunks you want the runtime to render.
     RenderDistance can be updated via PPT.UpdateRenderDistance
 --]]
-function PPT.EnableClientRuntime(Tickrate: number, InitialTriAmount: number, RenderDistance: number): nil
+function PPT.EnableClientRuntime(Tickrate: number, RenderDistance: number, InitialTriAmount: number): nil
     if not Players.LocalPlayer then return end
+		if RenderDistance < 0 then return end
+		if not Tickrate or (Tickrate and Tickrate < 0) then Tickrate = 20;
     local Player: Player = Players.LocalPlayer
 
     local ClientCam: Camera = Environment.Camera
-    local ChunkDataStorage: {[string]: ChunkData} = {} :: {ChunkData}
-    local TrianglePool: BasinClass, PoolSuccess: boolean = Basin.New(Triangle, InitialTriAmount, false);
-    if not PoolSuccess then return end
+    local UnrenderedChunks: {[string]: ChunkData} = {} :: {[string]: ChunkData}
+		local RenderedChunks: {[string]: ChunkData} = {} :: {[string]: ChunkData}
 
     ChunkDataBus.InvokedClient:Connect(function(ChunkBatchMessage: NetMessage): nil
         for _: string, chunk: ChunkData in ipairs(PPT.DecodeBatch(ChunkBatchMessage:GetString("chunks"))) do
             local key = chunk.ChunkPosition.x .. "," .. chunk.ChunkPosition.y
-            ChunkDataStorage[key] = chunk
+            UnrenderedChunks[key] = chunk
         end
     end)
 
@@ -314,6 +322,17 @@ function PPT.EnableClientRuntime(Tickrate: number, InitialTriAmount: number, Ren
         Config.PointInterval = msg:GetNumber("PointInterval")
         Config.ChunkSize = msg:GetNumber("ChunkSize")
     end)
+    PPT.RequestSharedConfig()
+
+		if InitialTriAmount < 0 then     
+			while not (Config.ChunkSize or Config.PointInterval) do
+				wait(0.1)
+			end
+			InitialTriAmount = CalculateTriPoolSize(Config.PointInterval, Config.ChunkSize, RenderDistance)
+		end
+
+		local TrianglePool: BasinClass, PoolSuccess: boolean = Basin.New(Triangle, InitialTriAmount, false);
+    if not PoolSuccess then return end
 
     ChangeRenderDistance.Invoked:Connect(function(NewDist: number): nil
         RenderDistance = NewDist
@@ -331,16 +350,22 @@ function PPT.EnableClientRuntime(Tickrate: number, InitialTriAmount: number, Ren
             return
         end
 
-        for _, chunk: ChunkData in pairs(ChunkDataStorage) do
+				local playerchunkpos: vector = math.floor(playerpos / Config.ChunkSize)
+				local currchunkpos: vector = VecCreate(0, 0)
+				for x = -RenderDistance, RenderDistance do
+					currchunkpos.x = x + playerchunkpos.x
+					for z = -RenderDistance, RenderDistance do
+						currchunkpos.z = z + playerchunkpos.z
+						local key: string = tostring(currchunkpos.x) .. "," .. tostring(currchunkpos.z)
+						if not UnrenderedChunks[key] then continue end
+						PPT.RenderChunk(UnrenderedChunks[key], TrianglePool, Config, true)
+					end
+				end
+
+        for _, chunk: ChunkData in pairs(RenderedChunks) do
             local chunkpos: vector = VecCreate(chunk.ChunkPosition.x, 0, chunk.ChunkPosition.y) * Config.ChunkSize
-            local outOfRange: boolean = vector.magnitude(playerpos - chunkpos) > RenderDistance * Config.ChunkSize
-            if chunk.isRendered then
-                if outOfRange then PPT.UnrenderChunk(chunk) end
-                continue
-            end
-            if outOfRange then continue end
-            
-            PPT.RenderChunk(chunk, TrianglePool, Config, true)
+						local outOfRange: boolean = vector.magnitude((chunkpos - playerchunkpos)) > RenderDistance
+            if outOfRange then PPT.UnrenderChunk(chunk) end
         end
     end)
 end
