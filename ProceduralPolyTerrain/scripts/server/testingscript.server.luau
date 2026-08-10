@@ -8,8 +8,8 @@ local config: PPTConfig = {
     Persistence = 0.5, -- server only
     Lacunarity = 2, -- server only
     Seed = 111, -- server only
-    ChunkSize = 32, -- shared, server controlled
-    PointInterval = 16 -- shared, server controlled
+    ChunkSize = 96, -- shared, server controlled
+    PointInterval = 48 -- shared, server controlled
 } :: PPTConfig
 local tickrate: number = 10
 

@@ -147,15 +147,20 @@ function Basin.New(ItemType: any, Amount: number, isShared: boolean?): (BasinCla
 	self.Size = Amount
 	self.Directory = Directory
 	self.ItemType = ItemType
-
-	self.Pool = table.create(Amount)
-	self.AvaliableObjs = table.create(Amount)
-	for idx: number, _ in ipairs(self.Pool) do
-		local ObjSuccess: boolean, Obj: ObjectClass? = Object.New(ItemType, self)
+	
+	local CurrentObjectCount: number = 0
+	self.Pool = {}
+	self.AvaliableObjs = {}
+	while CurrentObjectCount < Amount do
+		local 
+			ObjSuccess: Success, 
+			Obj: ObjectClass? = Object.New(ItemType, self)
 		if not ObjSuccess then return nil, false, Log("Failed to create object of item type '" .. tostring(ItemType) .. "'!") end
-		self.Pool[idx] = Obj :: ObjectClass
-		self.AvaliableObjs[idx] = Obj :: ObjectClass
+		self.Pool[#self.Pool + 1] = Obj :: ObjectClass
+		self.AvaliableObjs[#self.AvaliableObjs + 1] = Obj :: ObjectClass
+		CurrentObjectCount += 1
 	end
+
 	return self, true, Log("Created object pool with size " .. tostring(#self.Pool) .. " with item type " .. tostring(ItemType))
 end
 

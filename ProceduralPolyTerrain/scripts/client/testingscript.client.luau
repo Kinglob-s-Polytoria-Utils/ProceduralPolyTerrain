@@ -1,14 +1,14 @@
 local PPTClient: typeof(require(Hidden.PPTClient)) = require(Hidden.PPTClient)
 
-local tickrate: number = 2
-local objpoolsize: number = 256
-local renderdist: number = 1
+local tickrate: number = 4
+local objpoolsize: number = 4096
+local renderdist: number = 6
 
-PPTClient.EnableClientRuntime(tickrate, objpoolsize, renderdist)
+PPTClient.EnableClientRuntime(tickrate, renderdist, objpoolsize)
 
-for x = 0, 1 do
+for x = -16, 16 do
     local reqs: {vector} = {}
-    for z = 0, 1 do
+    for z = -16, 16 do
         reqs[#reqs + 1] = vector.create(x, z)
     end
     PPTClient.RequestChunks(reqs) -- takes a table of native luau vec2s
