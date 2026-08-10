@@ -13,3 +13,10 @@ for x = -16, 16 do
     end
     PPTClient.RequestChunks(reqs) -- takes a table of native luau vec2s
 end
+
+wait(5)
+PPTClient.DisableClientRuntime()
+print("disabled")
+wait(5)
+print("reenabled")
+PPTClient.EnableClientRuntime(tickrate, renderdist, objpoolsize)

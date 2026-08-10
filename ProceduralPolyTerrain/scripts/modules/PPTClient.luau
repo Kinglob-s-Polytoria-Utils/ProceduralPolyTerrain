@@ -34,6 +34,7 @@ local PPT = {}
 local ModuleConfig: typeof(require(script.ClientConfig)) = require(script.ClientConfig)
 assert(ModuleConfig, "[ PPTClient ] Couldn't find ModuleConfig (ClientConfig)!")
 
+-- Hi, Don't change paths to events here, instead do it in ClientConfig!
 local Triangle3D: typeof(require(ModuleConfig.Triangle3DModule)) = require(ModuleConfig.Triangle3DModule)
 assert(Triangle3D, "[ PPTClient ] Couldn't find Triangle3D!")
 local Basin: typeof(require(ModuleConfig.BasinModule)) = require(ModuleConfig.BasinModule)
@@ -47,6 +48,9 @@ local ChunkDataBus: NetworkEvent = ModuleConfig.ChunkDataBus
 assert(ChunkDataBus, "[ PPTClient ] Couldn't find ChunkDataBus!")
 local SharedConfigBus: NetworkEvent = ModuleConfig.SharedConfigBus
 assert(SharedConfigBus, "[ PPTClient ] Couldn't find SharedConfigBus!")
+local DisableRuntime: BindableEvent = ModuleConfig.DisableRuntime
+assert(SharedConfigBus, "[ PPTServer ] Couldn't find DisableRuntime!")
+-- Did you read the comment?
 
 local Noise: typeof(math.noise) = math.noise
 local VecCreate: typeof(vector.create) = vector.create
@@ -55,6 +59,12 @@ local MathFloor: typeof(math.floor) = math.floor
 local TableInsert: typeof(table.insert) = table.insert
 local TableCreate: typeof(table.create) = table.create
 local TableClear: typeof(table.clear) = table.clear
+
+-- Runtime data that is stored privately.
+-- Call PPT.Cleanup() to empty these.
+local TrianglePool: BasinClass
+local UnrenderedChunks: { [number]: ChunkData } = {} :: { [number]: ChunkData }
+local RenderedChunks: { [number]: ChunkData } = {} :: { [number]: ChunkData }
 
 --[[
     Helper function for getting the index of a vertex.
@@ -283,50 +293,63 @@ function PPT.EnableClientRuntime(Tickrate: number, RenderDistance: number, Initi
 	end
 	local Player: Player = Players.LocalPlayer
 
-	local UnrenderedChunks: { [number]: ChunkData } = {} :: { [number]: ChunkData }
-	local RenderedChunks: { [number]: ChunkData } = {} :: { [number]: ChunkData }
 
-	ChunkDataBus.InvokedClient:Connect(function(ChunkBatchMessage: NetMessage): nil
-		for _: string, chunk: ChunkData in ipairs(PPT.DecodeBatch(ChunkBatchMessage:GetString("chunks"))) do
-			UnrenderedChunks[GetChunkKey(chunk.ChunkPosition.x, chunk.ChunkPosition.y)] = chunk
+	local ChunkDataBusConnection: PTSignal = ChunkDataBus.InvokedClient:Connect(
+		function(ChunkBatchMessage: NetMessage): nil
+			for _: string, chunk: ChunkData in ipairs(PPT.DecodeBatch(ChunkBatchMessage:GetString("chunks"))) do
+				UnrenderedChunks[GetChunkKey(chunk.ChunkPosition.x, chunk.ChunkPosition.y)] = chunk
+			end
 		end
-	end)
+	)
 
 	local Config: { number } = {}
-	SharedConfigBus.InvokedClient:Connect(function(msg: NetMessage)
+	local SharedConfigBusConnection: PTSignal = SharedConfigBus.InvokedClient:Connect(function(msg: NetMessage)
 		Config.PointInterval = msg:GetNumber("PointInterval")
 		Config.ChunkSize = msg:GetNumber("ChunkSize")
 	end)
 	PPT.RequestSharedConfig()
 
-	local TrianglePool: BasinClass, PoolSuccess: boolean = Basin.New(Triangle, InitialTriAmount, false)
-	if not PoolSuccess then
-		return
+	if not TrianglePool then
+		local PoolSuccess: boolean
+		TrianglePool, PoolSuccess = Basin.New(Triangle, InitialTriAmount, false)
+		if not PoolSuccess then
+			return
+		end
+	elseif TrianglePool.Size < InitialTriAmount then
+		TrianglePool:Reserve(InitialTriAmount)
 	end
 
-	ChangeRenderDistance.Invoked:Connect(function(NewDist: number): nil
+	local ChangeRenderDistanceConnection: PTSignal = ChangeRenderDistance.Invoked:Connect(function(NewDist: number): nil
 		RenderDistance = NewDist
 	end)
 
 	local last_position: vector? = nil
-    local elapsed_dt: number = 0
-	Hooks.PreRendered:Connect(function(DeltaTime: number)
-        elapsed_dt += DeltaTime
-        if elapsed_dt < 1/Tickrate then return end
-        elapsed_dt = 0
-        
-		local playerchunkpos: vector = VecFloor(VecCreate(Player.Position.X, Player.Position.Z) / Config.ChunkSize)
+	local elapsed_dt: number = 0
+	local PreRenderedConnection: PTSignal = Hooks.PreRendered:Connect(function(DeltaTime: number)
+		elapsed_dt += DeltaTime
+		if elapsed_dt < 1 / Tickrate then
+			return
+		end
+		elapsed_dt = 0
 
-        if last_position and last_position == playerchunkpos then return end
-        last_position = playerchunkpos
+		if not Config or not Config.ChunkSize then
+			PPT.RequestSharedConfig()
+			return
+		end
+
+		local playerchunkpos: vector = VecFloor(VecCreate(Player.Position.X, Player.Position.Z) / Config.ChunkSize)
+		if last_position == playerchunkpos then return end
+		last_position = playerchunkpos
 
 		local renderwidth: number = RenderDistance * 2 - 1
 		for idx: number = 0, renderwidth * renderwidth - 1 do
 			local x: number = (idx % renderwidth) - RenderDistance
 			local z: number = MathFloor(idx / renderwidth) - RenderDistance
 			local currchunkpos: vector = VecCreate(x, z) + playerchunkpos
-            local key: number = GetChunkKey(currchunkpos.x, currchunkpos.y)
-			if not UnrenderedChunks[key] then continue end
+			local key: number = GetChunkKey(currchunkpos.x, currchunkpos.y)
+			if not UnrenderedChunks[key] then
+				continue
+			end
 			local chunk: ChunkData = UnrenderedChunks[key]
 			UnrenderedChunks[key] = nil
 			RenderedChunks[key] = chunk
@@ -342,6 +365,16 @@ function PPT.EnableClientRuntime(Tickrate: number, RenderDistance: number, Initi
 			UnrenderedChunks[key] = chunk
 			RenderedChunks[key] = nil
 		end
+	end)
+
+	local DisableRuntimeConnection: PTSignal
+	DisableRuntimeConnection = DisableRuntime.Invoked:Connect(function()
+		print("[ PPTClient ] Disabled Client Runtime!")
+		PreRenderedConnection:Disconnect()
+		ChunkDataBusConnection:Disconnect()
+		SharedConfigBusConnection:Disconnect()
+		ChangeRenderDistanceConnection:Disconnect()
+		DisableRuntimeConnection:Disconnect()
 	end)
 end
 
@@ -366,13 +399,29 @@ end
 --[[
     Update render distance.
     Only runnable on client.
-]]
---
+--]]
 function PPT.UpdateRenderDistance(RenderDistance: number): nil
 	if not Players.LocalPlayer then
 		return
 	end
 	ChangeRenderDistance.Invoke(RenderDistance)
+end
+
+--[[
+	Disables the currently active client runtime.
+--]]
+function PPT.DisableClientRuntime(): nil
+	DisableRuntime.Invoke()
+end
+
+--[[
+	Empties currently cached rendered and unrendered chunks,
+	along with the triangle pool.
+--]]
+function PPT.Cleanup(): nil
+	TrianglePool:Destroy()
+	TableClear(RenderedChunks)
+	TableClear(UnrenderedChunks)
 end
 
 return PPT

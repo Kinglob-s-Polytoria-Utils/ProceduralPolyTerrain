@@ -8,6 +8,8 @@ local ChunkDataBus: NetworkEvent = ModuleConfig.ChunkDataBus
 assert(ChunkDataBus, "[ PPTServer ] Couldn't find ChunkDataBus!")
 local SharedConfigBus: NetworkEvent = ModuleConfig.SharedConfigBus
 assert(SharedConfigBus, "[ PPTServer ] Couldn't find SharedConfigBus!")
+local DisableRuntime: BindableEvent = ModuleConfig.DisableRuntime
+assert(SharedConfigBus, "[ PPTServer ] Couldn't find DisableRuntime!")
 -- Did you read the comment?
 
 local Noise: typeof(math.noise) = math.noise
@@ -26,16 +28,14 @@ end
     Helper function for getting the index / key of a chunk.
 --]]
 local function GetChunkKey(x: number, z: number): number
-	return x * 786634 + z
+	return x * 10000000 + z
 end
 
 --[[
     Server only function for setting shared & server config.
 --]]
 function PPT.SetConfig(Config: PPTConfig): nil
-	if Players.LocalPlayer then
-		return
-	end
+	if Players.LocalPlayer then return end
 	ConfigServer = Config
 end
 
@@ -177,10 +177,11 @@ function PPT.DecodeBatch(ChunkBatchString: string): { ChunkData }
 end
 
 function PPT.StartServerRuntime(Tickrate: number): nil
+	local DisableRuntimeValue: boolean = false
 	if Players.LocalPlayer then
 		return
 	end
-	SharedConfigBus.InvokedServer:Connect(function(sender: Player, msg: NetMessage)
+	local SharedConfigBusConnection: PTSignal = SharedConfigBus.InvokedServer:Connect(function(sender: Player, msg: NetMessage)
 		local returnmsg: NetMessage = NetMessage.New()
 		returnmsg:AddNumber("PointInterval", ConfigServer.PointInterval)
 		returnmsg:AddNumber("ChunkSize", ConfigServer.ChunkSize)
@@ -188,7 +189,7 @@ function PPT.StartServerRuntime(Tickrate: number): nil
 	end)
 
 	local CachedChunks: { ChunkData } = {}
-	ChunkDataBus.InvokedServer:Connect(function(sender: Player, req: NetMessage)
+	local ChunkDataBusConnection: PTSignal = ChunkDataBus.InvokedServer:Connect(function(sender: Player, req: NetMessage)
 		local chunkcoordstr: { string } = string.split(req:GetString("ChunkCoordinates"), "_")
 
 		local chunkcoords: { vector } = TableCreate(#chunkcoordstr)
@@ -217,7 +218,11 @@ function PPT.StartServerRuntime(Tickrate: number): nil
 	local temp: PPTConfig = ConfigServer
 	local elapsed_dt: number = 0
 	local UpdateMsg: NetMessage = NetMessage.New()
-	Hooks.PreRendered:Connect(function(DeltaTime: number)
+	local PrerenderedConnection: PTSignal = Hooks.PreRendered:Connect(function(DeltaTime: number)
+		if DisableRuntimeValue then
+			Hooks.PreRendered:Disconnect()
+			return
+		end
 		elapsed_dt += DeltaTime
 		if elapsed_dt < 1 / Tickrate then
 			return
@@ -231,6 +236,22 @@ function PPT.StartServerRuntime(Tickrate: number): nil
 			SharedConfigBus.InvokeClients(UpdateMsg)
 		end
 	end)
+
+	local DisableRuntimeConnection: PTSignal
+	DisableRuntimeConnection = DisableRuntime.Invoked:Connect(function()
+		print("[ PPTServer ] Disabling server runtime!")
+		SharedConfigBusConnection:Disconnect()
+		ChunkDataBusConnection:Disconnect()
+		PrerenderedConnection:Disconnect()
+		DisableRuntimeConnection:Disconnect()
+	end)
+end
+
+--[[
+	Disables the currently active server runtime.
+--]]
+function PPT.DisableServerRuntime(): nil
+	DisableRuntime.Invoke()
 end
 
 return PPT
