@@ -1,3 +1,4 @@
+--!native
 local PPT = {}
 local ModuleConfig: typeof(require(script.ServerConfig)) = require(script.ServerConfig)
 assert(ModuleConfig, "[ PPTServer ] Couldn't find ModuleConfig (ServerConfig)!")
@@ -180,6 +181,8 @@ function PPT.StartServerRuntime(Tickrate: number): nil
 							local chunk = PPT.GenerateChunk(vec)
 							chunks[idx] = chunk
 							CachedChunks[key] = chunk
+						else
+							chunks[idx] = CachedChunks[key]
 						end
         end
         local BatchMsg: NetMessage = NetMessage.New()

@@ -59,15 +59,6 @@ local function GetIndex(x: number, z: number, stepsperrow: number): number
 end
 
 --[[
-    Server only function for setting shared & server config.
---]]
-function PPT.SetConfig(Config: PPTConfig): nil
-    if Players.LocalPlayer then return end
-    ConfigServer = Config
-end
-
-
---[[
     Requests the currently set shared config and returns it as
     a table.
 --]]
@@ -99,59 +90,12 @@ return Result / MaxAmplitude * Scale
 end
 
 --[[
-    Generates chunk data with a provided seed and chunk coordinate.
-    Server use only.
---]]
-function PPT.GenerateChunk(ChunkCoordinate: vector): ChunkData
-    local Config = ConfigServer
-    local ChunkSize: number = Config.ChunkSize
-    local PointInterval: number = Config.PointInterval
-    local Seed: number = Config.Seed
-    local stepsPerRow: number = (ChunkSize / PointInterval) + 1
-
-    local Chunk: ChunkData = {
-        ChunkPosition = ChunkCoordinate,
-        VertexCoordinates = TableCreate(stepsPerRow * stepsPerRow),
-        PooledObjects = {},
-        isRendered = false
-    }
-
-    -- flatten this loop when possible
-    for x: number = 0, ChunkSize do
-        if x % PointInterval ~= 0 then continue end
-        local worldx: number = ChunkCoordinate.x * ChunkSize + x
-        local xi: number = x / PointInterval
-        for z: number = 0, ChunkSize do
-            if z % PointInterval ~= 0 then continue end
-            local worldz: number = ChunkCoordinate.y * ChunkSize + z
-            local zi: number = z / PointInterval
-            local noise: number = WorldgenNoise2D(Config.Frequency, Config.Amplitude, Config.Scale, Config.Octaves, Config.Persistence, Config.Lacunarity, Seed, worldx, worldz)
-            local y: number = math.pow(math.abs(noise) * 1.2, 1)
-
-            Chunk.VertexCoordinates[GetIndex(xi, zi, stepsPerRow)] = VecCreate(worldx, y, worldz)
-        end
-    end
-
-    return Chunk
-end
-
---[[
     Renders the input chunk using triangles from the provided
     triangle pool.
-
-    SharedConfig is required if you're running this on the client (aka; by default)
-    isClient is set to true by default, as server-side rendering is not expected.
 --]]
-function PPT.RenderChunk(Chunk: ChunkData, TrianglePool: BasinClass, SharedConfig: {number}?, isClient: boolean?): nil
-    if isClient == nil then isClient = true end
+function PPT.RenderChunk(Chunk: ChunkData, TrianglePool: BasinClass, SharedConfig: {number}): nil
     Chunk.isRendered = true
-    local Config: {number} | PPTConfig
-    if isClient then
-        Config = SharedConfig
-    else
-        if Players.LocalPlayer then return end
-        Config = ConfigServer
-    end
+    local Config: {number} = SharedConfig
     local ChunkSize: number = Config.ChunkSize
     local PointInterval: number = Config.PointInterval
     local stepsPerRow: number = (ChunkSize / PointInterval) + 1
@@ -294,8 +238,6 @@ end
 
     InitialTriAmount is the number of pre-allocated triangles
     you want the client to have.
-		Setting triangle amount to less than 0 will dynamically make a pool
-		based off of the set render distance and triangle count for a single chunk.
 
     RenderDistance is the number of chunks you want the runtime to render.
     RenderDistance can be updated via PPT.UpdateRenderDistance
@@ -303,7 +245,7 @@ end
 function PPT.EnableClientRuntime(Tickrate: number, RenderDistance: number, InitialTriAmount: number): nil
     if not Players.LocalPlayer then return end
 		if RenderDistance < 0 then return end
-		if not Tickrate or (Tickrate and Tickrate < 0) then Tickrate = 20;
+		if not Tickrate or (Tickrate and Tickrate < 0) then Tickrate = 20; end
     local Player: Player = Players.LocalPlayer
 
     local ClientCam: Camera = Environment.Camera
@@ -324,15 +266,9 @@ function PPT.EnableClientRuntime(Tickrate: number, RenderDistance: number, Initi
     end)
     PPT.RequestSharedConfig()
 
-		if InitialTriAmount < 0 then     
-			while not (Config.ChunkSize or Config.PointInterval) do
-				wait(0.1)
-			end
-			InitialTriAmount = CalculateTriPoolSize(Config.PointInterval, Config.ChunkSize, RenderDistance)
-		end
 
-		local TrianglePool: BasinClass, PoolSuccess: boolean = Basin.New(Triangle, InitialTriAmount, false);
-    if not PoolSuccess then return end
+		local TrianglePool: BasinClass, PoolSuccess: boolean = Basin.New(Triangle, InitialTriAmount, false)
+		if not PoolSuccess then return end
 
     ChangeRenderDistance.Invoked:Connect(function(NewDist: number): nil
         RenderDistance = NewDist
@@ -350,23 +286,22 @@ function PPT.EnableClientRuntime(Tickrate: number, RenderDistance: number, Initi
             return
         end
 
-				local playerchunkpos: vector = math.floor(playerpos / Config.ChunkSize)
-				local currchunkpos: vector = VecCreate(0, 0)
-				for x = -RenderDistance, RenderDistance do
-					currchunkpos.x = x + playerchunkpos.x
-					for z = -RenderDistance, RenderDistance do
-						currchunkpos.z = z + playerchunkpos.z
-						local key: string = tostring(currchunkpos.x) .. "," .. tostring(currchunkpos.z)
-						if not UnrenderedChunks[key] then continue end
-						PPT.RenderChunk(UnrenderedChunks[key], TrianglePool, Config, true)
-					end
+				local playerchunkpos: vector = vector.floor(playerpos / Config.ChunkSize)
+
+				for idx: number = -RenderDistance * RenderDistance, RenderDistance * RenderDistance do
+					local x: number = idx % Config.ChunkSize
+					local z: number = x % Config.ChunkSize
+					local currchunkpos: vector = VecCreate(x, z) + VecCreate(math.floor(playerpos.x), math.floor(playerpos.z))
+					local key: string = tostring(currchunkpos.x) .. "," .. tostring(currchunkpos.z)
+					if not UnrenderedChunks[key] then continue end
+					PPT.RenderChunk(UnrenderedChunks[key], TrianglePool, Config, true)
 				end
 
-        for _, chunk: ChunkData in pairs(RenderedChunks) do
+        --[[for _: string, chunk: ChunkData in pairs(RenderedChunks) do
             local chunkpos: vector = VecCreate(chunk.ChunkPosition.x, 0, chunk.ChunkPosition.y) * Config.ChunkSize
 						local outOfRange: boolean = vector.magnitude((chunkpos - playerchunkpos)) > RenderDistance
             if outOfRange then PPT.UnrenderChunk(chunk) end
-        end
+        end]]--
     end)
 end
 
@@ -393,52 +328,6 @@ end
 function PPT.UpdateRenderDistance(RenderDistance: number): nil
     if not Players.LocalPlayer then return end
     ChangeRenderDistance.Invoke(RenderDistance)
-end
-
-function PPT.StartServerRuntime(Tickrate: number): nil
-    if Players.LocalPlayer then return end
-    SharedConfigBus.InvokedServer:Connect(function(sender: Player, msg: NetMessage)
-        local returnmsg: NetMessage = NetMessage.New()
-        returnmsg:AddNumber("PointInterval", ConfigServer.PointInterval)
-        returnmsg:AddNumber("ChunkSize", ConfigServer.ChunkSize)
-        SharedConfigBus.InvokeClient(returnmsg, sender)
-    end)
-
-    ChunkDataBus.InvokedServer:Connect(function(sender: Player, req: NetMessage)
-        local chunkcoordstr: {string} = string.split(req:GetString("ChunkCoordinates"), "_")
-
-        local chunkcoords: {vector} = TableCreate(#chunkcoordstr)
-        for idx: number, vecstr: string in ipairs(chunkcoordstr) do
-            local nums: {string} = string.split(vecstr, ",")
-            chunkcoords[idx] = VecCreate(tonumber(nums[1]), tonumber(nums[2]))
-        end
-
-        -- only send 2 chunks at once
-        local chunks: {ChunkData} = TableCreate(2)
-        for idx: number, vec: vector in ipairs(chunkcoords) do
-            chunks[idx] = PPT.GenerateChunk(vec)
-        end
-        local BatchMsg: NetMessage = NetMessage.New()
-        BatchMsg:AddString("chunks", PPT.EncodeBatch(chunks))
-        ChunkDataBus.InvokeClient(BatchMsg, sender)
-        
-    end)
-
-    local temp: PPTConfig = ConfigServer
-    local elapsed_dt: number = 0
-    local UpdateMsg: NetMessage = NetMessage.New()
-    Hooks.PreRendered:Connect(function(DeltaTime: number)
-        elapsed_dt += DeltaTime
-        if elapsed_dt < 1/Tickrate then return end
-        elapsed_dt = 0
-
-        if ConfigServer ~= temp then
-            temp = ConfigServer
-            UpdateMsg:AddNumber("PointInterval", ConfigServer.PointInterval)
-            UpdateMsg:AddNumber("ChunkSize", ConfigServer.ChunkSize)
-            SharedConfigBus.InvokeClients(UpdateMsg)
-        end
-    end)
 end
 
 return PPT
