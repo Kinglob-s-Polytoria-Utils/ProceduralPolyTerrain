@@ -9,6 +9,9 @@ local cleartable: typeof(table.clear) = table.clear
 local getcreatetime: typeof(os.clock) = os.clock
 local floor: typeof(math.floor) = math.floor
 
+--[Cached values]--
+local StorePosition: Vector3 = Vector3.New(math.huge, math.huge, math.huge)
+
 local function Log(Reason: Reason): Reason
 	print(string.format("[Basin]: %s", Reason))
 	return Reason
@@ -41,7 +44,6 @@ export type BasinProperties = {
 	Pool: {ObjectClass},
 	AvaliableObjs: {ObjectClass},
 	ItemType: any,
-	Directory: Folder?,
 	
 	--[Methods]--
 	New:			(ItemType: any, Amount: number, isShared: boolean?) -> (BasinClass?, Success, Reason?),
@@ -67,7 +69,8 @@ function Object.New(ItemType: any, Basin: BasinClass): (Success, ObjectClass?, R
 
 	self.ParentBasin = Basin
 	self.Item = ItemType:Clone()
-	self.Item.Parent = Basin.Directory
+	self.Item.Parent = Environment
+	self.Item.Position = StorePosition
 	self.InUse = false
 	self.IsUnanchored = false
 	self.IsPhysical = ItemType:IsA("Physical")
@@ -96,7 +99,7 @@ end
 function Object:Push(): (Success, Reason?)
 	if not self.IsUnanchored and self.IsPhysical then self.Item.Anchored = false end
 
-	self.Item.Parent = self.ParentBasin.Directory
+	self.Item.Position = StorePosition
 	self.InUse = false
 	
 	if self.IsNPC then self.Item:Respawn() end
@@ -120,32 +123,13 @@ Basin.__index = Basin
 
 	Default isShared value is false.
 ]]
-function Basin.New(ItemType: any, Amount: number, isShared: boolean?): (BasinClass?, Success, Reason?)
+function Basin.New(ItemType: any, Amount: number): (BasinClass?, Success, Reason?)
 	local self: BasinClass = setmetatable(
 		{} :: BasinProperties,
 		Basin
 	)
 	
-	local isClient: boolean = if Players.LocalPlayer then true else false
-	local Shared: boolean = isShared or false
-
-	if not world.Hidden.ObjectPools and isClient then 
-		local ObjectPoolsFolder = Folder.New()	
-		ObjectPoolsFolder.Name = "ObjectPools"
-		ObjectPoolsFolder.Parent = world.Hidden
-	elseif not world.Hidden.ObjectPoolsFolder and not isClient then
-		local ObjectPoolsFolder = Folder.New()	
-		ObjectPoolsFolder.Name = "ObjectPools"
-		ObjectPoolsFolder.Parent = world.ServerHidden
-	end
-
-	local CreationTime: number = floor(getcreatetime() * 1000)
-	local Directory: Folder = Folder.New()
-	Directory.Parent = if isClient or Shared then world.Hidden.ObjectPools else world.ServerHidden.ObjectPools
-	Directory.Name = tostring(CreationTime)
-
 	self.Size = Amount
-	self.Directory = Directory
 	self.ItemType = ItemType
 	
 	local CurrentObjectCount: number = 0
@@ -257,7 +241,6 @@ function Basin:Destroy(): (Success, Reason?)
 	end
 
 	cleartable(self.Pool)
-	self.Directory:Destroy()
 	cleartable(self)
 	return true
 end
