@@ -25,9 +25,27 @@ export type PPTConfig = {
 	Octaves: number, -- server
 	Persistence: number, -- server
 	Lacunarity: number, -- server
+	MaximumY: number, -- server
 	Seed: number,
 	ChunkSize: number, -- shared
 	PointInterval: number, -- shared
+}
+
+--[[
+	All values are optional, except for MinHeight.
+--]]
+export type TriangleVisualQuery = {
+	MinHeight: number,
+	Color: Color?,
+	Material: PartMaterial?,
+	IsSpawn: boolean?,
+	Mass: number?,
+	Friction: number?,
+	Bounciness: number?,
+	Anchored: boolean?,
+	CanCollide: boolean?,
+	CollisionLayers: number?,
+	CollisionMask: number?
 }
 
 local PPT = {}
@@ -65,6 +83,7 @@ local TableClear: typeof(table.clear) = table.clear
 local TrianglePool: BasinClass
 local UnrenderedChunks: { [number]: ChunkData } = {} :: { [number]: ChunkData }
 local RenderedChunks: { [number]: ChunkData } = {} :: { [number]: ChunkData }
+local TriangleVisuals: {[number]: TriangleVisualQuery} = {} :: {[number]: TriangleVisualQuery}
 
 --[[
     Helper function for getting the index of a vertex.
@@ -115,6 +134,22 @@ local function WorldgenNoise2D(
 		Amplitude *= Persistence
 	end
 	return Result / MaxAmplitude * Scale
+end
+
+--[[
+	Applies visuals to the passed in part
+--]]
+local function ApplyVisual(Query: TriangleVisualQuery, Triangle: Part): nil
+	if Query.Color then Triangle.Color = Query.Color end
+	if Query.Material then Triangle.Material = Query.Material end
+	if Query.Anchored then Triangle.Anchored = Query.Anchored end
+	if Query.Friction then Triangle.Friction = Query.Friction end
+	if Query.Mass then Triangle.Mass = Query.Mass end
+	if Query.CollisionLayers then Triangle.CollisionLayers = Query.CollisionLayers end
+	if Query.CollisionMask then Triangle.CollisionMask = Query.CollisionMask end
+	if Query.IsSpawn then Triangle.IsSpawn = Query.IsSpawn end
+	if Query.CanCollide then Triangle.CanCollide = Query.CanCollide end
+	if Query.Bounciness then Triangle.Bounciness = Query.Bounciness end
 end
 
 --[[
@@ -173,6 +208,15 @@ function PPT.RenderChunk(Chunk: ChunkData, TrianglePool: BasinClass, SharedConfi
 
 			Triangle3D.SplitTriangle(tri1, tri2, po1, po2, po4)
 			Triangle3D.SplitTriangle(tri3, tri4, po1, po4, po3)
+
+			-- process triangle visuals
+			
+			for _: number, obj: ObjectClass in ipairs(triangles) do
+				local Height: number = obj.Item.Position.Y
+				for minheight: number, query: TriangleVisualQuery in ipairs(TriangleVisuals) do
+					if Height > minheight then ApplyVisual(query, obj.Item) end
+				end
+			end
 
 			tri1.Parent = Environment
 			tri2.Parent = Environment
@@ -422,6 +466,23 @@ function PPT.Cleanup(): nil
 	TrianglePool:Destroy()
 	TableClear(RenderedChunks)
 	TableClear(UnrenderedChunks)
+	TableClear(TriangleVisuals)
+end
+
+--[[
+	Appends a configuration(s) to the TriangleVisuals	
+	table which allows the automatic changing of properties
+	for triangles at different heights.
+--]]
+function PPT.AppendTriangleVisuals(Queries: {TriangleVisualQuery}): nil
+	for idx: number, Query: TriangleVisualQuery in ipairs(Queries) do
+		local MinHeight: number = Query.MinHeight
+		if TriangleVisuals[MinHeight] then 
+			print("[ PPTClient ] Unable to add triangle visual query as it matches the MinHeight of another query!")
+			continue
+		end
+		TriangleVisuals[MinHeight] = Query
+	end
 end
 
 return PPT

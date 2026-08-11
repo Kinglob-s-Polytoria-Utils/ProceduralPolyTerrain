@@ -1,5 +1,11 @@
 local PPTClient: typeof(require(Hidden.PPTClient)) = require(Hidden.PPTClient)
 
+PPTClient.AppendTriangleVisuals({
+	{MinHeight = 1, Color = Color.New(50, 200, 50)}, -- Grass
+	{MinHeight = 4, Color = Color.New(20, 20, 20)}, -- Mountain rock
+	{MinHeight = 8, Color = Color.New(255, 255, 255)} -- Snow
+} :: {AppendTriangleVisuals});
+
 local tickrate: number = 4
 local objpoolsize: number = 4096
 local renderdist: number = 6

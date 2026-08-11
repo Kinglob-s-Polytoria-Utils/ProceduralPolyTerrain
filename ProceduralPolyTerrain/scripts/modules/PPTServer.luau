@@ -1,4 +1,37 @@
 --!native
+export type ChunkData = {
+	ChunkPosition: vector,
+	VertexCoordinates: { vector },
+	PooledObjects: { ObjectClass },
+	isRendered: boolean,
+}
+
+--[[
+    Chunk size is the length of a single chunk in
+    polytoria units.
+    
+    Point interval is a value for how many points are
+		created per length units.
+
+		For example:
+		ChunkSize = 16
+		PointIntreval = 4
+		Each row will have 4 points.
+--]]
+export type PPTConfig = {
+	Frequency: number, -- server
+	Amplitude: number, -- server
+	Scale: number, -- server
+	Octaves: number, -- server
+	Persistence: number, -- server
+	Lacunarity: number, -- server
+	MaximumY: number, -- server
+	MinimumY: number, -- server
+	Seed: number,
+	ChunkSize: number, -- shared
+	PointInterval: number, -- shared
+}
+
 local PPT = {}
 local ModuleConfig: typeof(require(script.ServerConfig)) = require(script.ServerConfig)
 assert(ModuleConfig, "[ PPTServer ] Couldn't find ModuleConfig (ServerConfig)!")
@@ -103,7 +136,7 @@ function PPT.GenerateChunk(ChunkCoordinate: vector): ChunkData
 				worldx,
 				worldz
 			)
-			local y: number = math.pow(math.abs(noise) * 1.2, 1)
+			local y: number = math.clamp(math.pow(math.abs(noise) * 1.2, 1), Config.MinimumY, Config.MaximumY)
 
 			Chunk.VertexCoordinates[GetIndex(xi, zi, stepsPerRow)] = VecCreate(worldx, y, worldz)
 		end
