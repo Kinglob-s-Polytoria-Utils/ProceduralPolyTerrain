@@ -77,6 +77,8 @@ local MathFloor: typeof(math.floor) = math.floor
 local TableInsert: typeof(table.insert) = table.insert
 local TableCreate: typeof(table.create) = table.create
 local TableClear: typeof(table.clear) = table.clear
+local TableConcat: typeof(table.concat) = table.concat
+local StringSplit: typeof(string.split) = string.split
 
 -- Runtime data that is stored privately.
 -- Call PPT.Cleanup() to empty these.
@@ -97,13 +99,6 @@ end
 --]]
 local function GetChunkKey(x: number, z: number): number
 	return x * 10000000 + z
-end
-
---[[
-    Faster than vector.magnitude (i think)
---]]
-local function VecSqrMag(a: vector): number
-	return a.x * a.x + a.y * a.y + a.z * a.z
 end
 
 --[[
@@ -210,12 +205,16 @@ function PPT.RenderChunk(Chunk: ChunkData, TrianglePool: BasinClass, SharedConfi
 			Triangle3D.SplitTriangle(tri3, tri4, po1, po4, po3)
 
 			-- process triangle visuals
-			
 			for _: number, obj: ObjectClass in ipairs(triangles) do
 				local Height: number = obj.Item.Position.Y
-				for minheight: number, query: TriangleVisualQuery in ipairs(TriangleVisuals) do
-					if Height > minheight then ApplyVisual(query, obj.Item) end
+				local currquery: TriangleVisualQuery = nil
+				for minheight: number, query: TriangleVisualQuery in pairs(TriangleVisuals) do
+					if not currquery then currquery = query end
+					if Height > minheight and currquery.MinHeight < minheight then
+						currquery = query
+					end
 				end
+				ApplyVisual(currquery, obj.Item)
 			end
 
 			tri1.Parent = Environment
@@ -251,7 +250,7 @@ function PPT.Encode(Chunk: ChunkData): string
 		vertParts[(i - 1) * 3 + 3] = tostring(v.z)
 	end
 	return json.serialize({
-		VertexCoordinates = table.concat(vertParts, "_"),
+		VertexCoordinates = TableConcat(vertParts, "_"),
 		ChunkPositionX = Chunk.ChunkPosition.x,
 		ChunkPositionY = Chunk.ChunkPosition.y,
 	})
@@ -263,7 +262,7 @@ end
 --]]
 function PPT.Decode(ChunkString: string): ChunkData
 	local ChunkJson = json.parse(ChunkString)
-	local parts: { string } = string.split(ChunkJson.VertexCoordinates, "_")
+	local parts: { string } = StringSplit(ChunkJson.VertexCoordinates, "_")
 	local verts: { vector } = TableCreate(#parts / 3)
 	for i = 1, #parts, 3 do
 		verts[(i - 1) / 3 + 1] = VecCreate(tonumber(parts[i]), tonumber(parts[i + 1]), tonumber(parts[i + 2]))
@@ -436,7 +435,7 @@ function PPT.RequestChunks(ChunkCoordinates: { vector }): nil
 		chunkcoordstr[idx] = tostring(vec)
 	end
 
-	req:AddString("ChunkCoordinates", table.concat(chunkcoordstr, "_"))
+	req:AddString("ChunkCoordinates", TableConcat(chunkcoordstr, "_"))
 	ChunkDataBus.InvokeServer(req)
 end
 
