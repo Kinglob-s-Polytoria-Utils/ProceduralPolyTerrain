@@ -6,11 +6,11 @@ PPTClient.AppendTriangleVisuals({
 	{MinHeight = 36, Color = Color.FromHex("#ffffff")} -- Snow
 } :: {AppendTriangleVisuals});
 
-local tickrate: number = 4
+local tickrate: number = 20
 local objpoolsize: number = 4096
 local renderdist: number = 8
 
-PPTClient.EnableClientRuntime(tickrate, renderdist, objpoolsize)
+PPTClient.EnableClientRuntime(tickrate, renderdist)
 
 for x = -16, 16 do
     local reqs: {vector} = {}

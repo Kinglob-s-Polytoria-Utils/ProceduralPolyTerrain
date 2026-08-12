@@ -10,7 +10,8 @@ local getcreatetime: typeof(os.clock) = os.clock
 local floor: typeof(math.floor) = math.floor
 
 --[Cached values]--
-local StorePosition: Vector3 = Vector3.New(math.huge, math.huge, math.huge)
+local StorePosition: Vector3 = Vector3.New(100000, 100000, 100000)
+local StoreColor: Color = Color.New():FromRGB(0, 0, 0, 0)
 
 local function Log(Reason: Reason): Reason
 	print(string.format("[Basin]: %s", Reason))
@@ -27,6 +28,7 @@ export type ObjectProperties = {
 	IsNPC: boolean,
 	isParticles: boolean,
 	ToggleAnchor: boolean,
+	Color: Color,
 	Item: any,
 
 	--[Methods]--
@@ -69,7 +71,7 @@ function Object.New(ItemType: any, Basin: BasinClass): (Success, ObjectClass?, R
 
 	self.ParentBasin = Basin
 	self.Item = ItemType:Clone()
-	self.Item.Parent = Environment
+	self.Item.Parent = world.Environment
 	self.Item.Position = StorePosition
 	self.InUse = false
 	self.IsUnanchored = false
@@ -77,6 +79,7 @@ function Object.New(ItemType: any, Basin: BasinClass): (Success, ObjectClass?, R
 	self.IsInstance = self.IsPhysical or ItemType:IsA("Instance")
 	self.IsNPC = ItemType:IsA("NPC")
 	self.isParticles = ItemType:IsA("Particles")
+	self.Color = ItemType.Color
 
 	if self.IsPhysical then
 		self.IsUnanchored = ItemType.Anchored
@@ -101,7 +104,8 @@ function Object:Push(): (Success, Reason?)
 
 	self.Item.Position = StorePosition
 	self.InUse = false
-	
+	self.Item.Color = StoreColor
+
 	if self.IsNPC then self.Item:Respawn() end
 	if self.isParticles then self.Item:Stop() end
 
@@ -166,6 +170,7 @@ function Basin:Pull(Amount: number?): (ObjectClass? | {ObjectClass}?, Success, R
 		AvaliableObjs[AvaliableObjsCount] = nil
 		Obj.InUse = true
 		if Obj.ToggleAnchor then Obj.Item.Anchored = false end
+		Obj.Item.Color = Obj.Color
 		return Obj, true
 	end
 	
@@ -175,6 +180,7 @@ function Basin:Pull(Amount: number?): (ObjectClass? | {ObjectClass}?, Success, R
 		AvaliableObjs[AvaliableObjsCount - index + 1] = nil
 		Obj.InUse = true
 		if Obj.ToggleAnchor then Obj.Item.Anchored = false end
+		Obj.Item.Color = Obj.Color
 		Pulled[#Pulled + 1] = Obj
 	end
 

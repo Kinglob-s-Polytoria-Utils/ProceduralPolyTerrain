@@ -77,6 +77,7 @@ local MathFloor: typeof(math.floor) = math.floor
 local TableInsert: typeof(table.insert) = table.insert
 local TableCreate: typeof(table.create) = table.create
 local TableClear: typeof(table.clear) = table.clear
+local TableRemove: typeof(table.remove) = table.remove
 local TableConcat: typeof(table.concat) = table.concat
 local StringSplit: typeof(string.split) = string.split
 
@@ -99,6 +100,25 @@ end
 --]]
 local function GetChunkKey(x: number, z: number): number
 	return x * 10000000 + z
+end
+
+--[[
+	Calculates the pool size for the client runtime based off the specified render distance.
+--]]
+local function CalculateTriPoolSize(PointInterval: number, ChunkSize: number, RenderDistance: number): number
+	local pointsperrow: number = ChunkSize / PointInterval
+	local trisperchunk: number = pointsperrow * pointsperrow * 4
+	local renderwidth: number = RenderDistance * 2 - 1
+	local overhead: number = renderwidth * trisperchunk
+	return trisperchunk * renderwidth * renderwidth + overhead
+end
+
+--[[
+	Calculates the amount of triangles in a chunk.
+--]]
+local function CalculateChunkTriCount(PointInterval: number, ChunkSize: number): number
+	local pointsperrow: number = ChunkSize / PointInterval
+	return pointsperrow * pointsperrow * 4
 end
 
 --[[
@@ -148,6 +168,20 @@ local function ApplyVisual(Query: TriangleVisualQuery, Triangle: Part): nil
 end
 
 --[[
+	Computes the visual query to apply to the part
+--]]
+local function ApplyVisualToTriangle(Triangle: Part): nil
+	local Height: number = Triangle.Position.Y
+	local currquery: TriangleVisualQuery = nil
+	for minheight: number, query: TriangleVisualQuery in pairs(TriangleVisuals) do
+		if not currquery then currquery = query end
+		if Height > minheight and currquery.MinHeight < minheight then
+			currquery = query
+		end
+	end
+end
+
+--[[
     Renders the input chunk using triangles from the provided
     triangle pool.
 --]]
@@ -156,72 +190,55 @@ function PPT.RenderChunk(Chunk: ChunkData, TrianglePool: BasinClass, SharedConfi
 	local Config: { number } = SharedConfig
 	local ChunkSize: number = Config.ChunkSize
 	local PointInterval: number = Config.PointInterval
-	local stepsPerRow: number = (ChunkSize / PointInterval) + 1
 	local VertexCoordinates: { vector } = Chunk.VertexCoordinates
-
-	for x: number = 0, ChunkSize - 1 do
-		if x % PointInterval ~= 0 then
-			continue
-		end
-		local xi: number = x / PointInterval
-		local xiNext: number = (x + PointInterval) / PointInterval
-		for z: number = 0, ChunkSize - 1 do
-			if z % PointInterval ~= 0 then
-				continue
+	
+	local tricount: number = CalculateChunkTriCount(PointInterval, ChunkSize)
+	local chunktriangles: {ObjectClass}, success: boolean = TrianglePool:Pull(tricount)
+	if not success then
+		if chunktriangles and #chunktriangles > 0 then
+			for _, obj: ObjectClass in ipairs(chunktriangles) do
+				obj:Push()
 			end
-			local zi: number = z / PointInterval
-			local ziNext: number = (z + PointInterval) / PointInterval
+		end
+		print("[ PPT ] Failed to pull triangles for chunk!")
+		TrianglePool:Reserve(#TrianglePool.Pool + tricount)
+		chunktriangles, success = TrianglePool:Pull(tricount)
+		if not success then
+			Chunk.isRendered = false
+			return
+		end
+	end
+
+		for _, obj: ObjectClass in ipairs(chunktriangles) do
+			Chunk.PooledObjects[#Chunk.PooledObjects + 1] = obj
+		end
+	
+	local stepsPerRow: number = (ChunkSize / PointInterval) + 1
+	local cellsperrow: number = ChunkSize / PointInterval
+	local totalcells: number = cellsperrow * cellsperrow
+	for idx: number = 0, totalcells - 1 do
+		local xi: number = idx % cellsperrow
+		local zi: number = MathFloor(idx / cellsperrow)
+		local xiNext: number = xi + 1
+		local ziNext: number = zi + 1
 
 			local po1: vector = VertexCoordinates[GetIndex(xi, zi, stepsPerRow)]
 			local po2: vector = VertexCoordinates[GetIndex(xiNext, zi, stepsPerRow)]
 			local po3: vector = VertexCoordinates[GetIndex(xi, ziNext, stepsPerRow)]
 			local po4: vector = VertexCoordinates[GetIndex(xiNext, ziNext, stepsPerRow)]
 
-			local triangles: { ObjectClass }, success: boolean = TrianglePool:Pull(4)
-			if not success then
-				if triangles and #triangles > 0 then
-					for _, obj: ObjectClass in ipairs(triangles) do
-						obj:Push()
-					end
-				end
-				print("[ PPT ] Failed to pull triangles for chunk!")
-				TrianglePool:Reserve(#TrianglePool.Pool + ChunkSize * ChunkSize)
-				triangles, success = TrianglePool:Pull(4)
-				if not success then
-					Chunk.isRendered = false
-					continue
-				end
-			end
-			for _, obj: ObjectClass in ipairs(triangles) do
-				Chunk.PooledObjects[#Chunk.PooledObjects + 1] = obj
-			end
-
-			local tri1: Part = triangles[1].Item
-			local tri2: Part = triangles[2].Item
-			local tri3: Part = triangles[3].Item
-			local tri4: Part = triangles[4].Item
+			local tri1: Part = chunktriangles[1 + (idx * 4)].Item
+			local tri2: Part = chunktriangles[2 + (idx * 4)].Item
+			local tri3: Part = chunktriangles[3 + (idx * 4)].Item
+			local tri4: Part = chunktriangles[4 + (idx * 4)].Item
 
 			Triangle3D.SplitTriangle(tri1, tri2, po1, po2, po4)
 			Triangle3D.SplitTriangle(tri3, tri4, po1, po4, po3)
 
-			-- process triangle visuals
-			for _: number, obj: ObjectClass in ipairs(triangles) do
-				local Height: number = obj.Item.Position.Y
-				local currquery: TriangleVisualQuery = nil
-				for minheight: number, query: TriangleVisualQuery in pairs(TriangleVisuals) do
-					if not currquery then currquery = query end
-					if Height > minheight and currquery.MinHeight < minheight then
-						currquery = query
-					end
-				end
-				ApplyVisual(currquery, obj.Item)
-			end
-
-			tri1.Parent = Environment
-			tri2.Parent = Environment
-			tri3.Parent = Environment
-			tri4.Parent = Environment
-		end
+			ApplyVisualToTriangle(tri1)
+			ApplyVisualToTriangle(tri2)
+			ApplyVisualToTriangle(tri3)
+			ApplyVisualToTriangle(tri4)
 	end
 end
 
@@ -302,45 +319,35 @@ function PPT.DecodeBatch(ChunkBatchString: string): { ChunkData }
 	return decoded
 end
 
-local function CalculateTriPoolSize(PointInterval: number, ChunkSize: number, RenderDistance: number): number
-	local chunktricount: number = (ChunkSize / PointInterval) / 3 * RenderDistance
-	return chunktricount
-end
-
 --[[
     Only runnable on the client.
-    Handles culling, object pooling, and rendering for the client.
+    Handles culling, objects, and rendering for the client.
     Pass chunks to the client using ChunkDataBus, with only chunk batch sends.
 
     Tickrate is the number of ticks per second that you want
     Eg; 20 for 1 tick to be 0.05 seconds
 
     InitialTriAmount is the number of pre-allocated triangles
-    you want the client to have.
+    you want the client to have. InitialTriAmount is optional,
+		as if you do not input anything it will compute the required
+		triangle pool automatically.
 
     RenderDistance is the number of chunks you want the runtime to render.
     RenderDistance can be updated via PPT.UpdateRenderDistance
 --]]
-function PPT.EnableClientRuntime(Tickrate: number, RenderDistance: number, InitialTriAmount: number): nil
-	if not Players.LocalPlayer then
-		return
-	end
-	if not RenderDistance or RenderDistance < 0 then
-		return
-	end
-	if not Tickrate or (Tickrate and Tickrate < 0) then
-		return
-	end
-	if not InitialTriAmount or InitialTriAmount < 1 then
-		return
-	end
+function PPT.EnableClientRuntime(Tickrate: number, RenderDistance: number, InitialTriAmount: number?): nil
+	if not Players.LocalPlayer then return end
+	if not RenderDistance or RenderDistance < 0 then return end
+	if not Tickrate or (Tickrate and Tickrate < 0) then return end
 	local Player: Player = Players.LocalPlayer
 
 
 	local ChunkDataBusConnection: PTSignal = ChunkDataBus.InvokedClient:Connect(
 		function(ChunkBatchMessage: NetMessage): nil
 			for _: string, chunk: ChunkData in ipairs(PPT.DecodeBatch(ChunkBatchMessage:GetString("chunks"))) do
-				UnrenderedChunks[GetChunkKey(chunk.ChunkPosition.x, chunk.ChunkPosition.y)] = chunk
+				local key: number = GetChunkKey(chunk.ChunkPosition.x, chunk.ChunkPosition.y)
+				if RenderedChunks[key] then continue end
+				UnrenderedChunks[key] = chunk
 			end
 		end
 	)
@@ -350,21 +357,26 @@ function PPT.EnableClientRuntime(Tickrate: number, RenderDistance: number, Initi
 		Config.PointInterval = msg:GetNumber("PointInterval")
 		Config.ChunkSize = msg:GetNumber("ChunkSize")
 	end)
+
 	PPT.RequestSharedConfig()
+	while not Config.ChunkSize do wait(0.1) end
 
 	if not TrianglePool then
+		if not InitialTriAmount or InitialTriAmount and InitialTriAmount < 0 then InitialTriAmount = CalculateTriPoolSize(Config.PointInterval, Config.ChunkSize, RenderDistance) end
 		local PoolSuccess: boolean
 		TrianglePool, PoolSuccess = Basin.New(Triangle, InitialTriAmount, false)
-		if not PoolSuccess then
-			return
-		end
+		if not PoolSuccess then return end
 	elseif TrianglePool.Size < InitialTriAmount then
 		TrianglePool:Reserve(InitialTriAmount)
 	end
 
 	local ChangeRenderDistanceConnection: PTSignal = ChangeRenderDistance.Invoked:Connect(function(NewDist: number): nil
 		RenderDistance = NewDist
+		TrianglePool:Reserve(CalculateTriPoolSize(Config.PointInterval, Config.ChunkSize, RenderDistance))
 	end)
+
+	local QueuedChunks: {ChunkData} = {} :: {ChunkData}
+	local ChunksToRenderPerTick: number = 4
 
 	local last_position: vector? = nil
 	local elapsed_dt: number = 0
@@ -380,25 +392,22 @@ function PPT.EnableClientRuntime(Tickrate: number, RenderDistance: number, Initi
 			return
 		end
 
+		-- render chunks in queue
+		local Rendered: number = 0
+		while #QueuedChunks > 0 and Rendered < ChunksToRenderPerTick do
+			local chunk: ChunkData = TableRemove(QueuedChunks)
+			local key: number = GetChunkKey(chunk.ChunkPosition.x, chunk.ChunkPosition.y)
+			RenderedChunks[key] = chunk
+			PPT.RenderChunk(chunk, TrianglePool, Config)
+			Rendered += 1
+		end
+
+		-- get player chunk pos
 		local playerchunkpos: vector = VecFloor(VecCreate(Player.Position.X, Player.Position.Z) / Config.ChunkSize)
 		if last_position == playerchunkpos then return end
 		last_position = playerchunkpos
-
-		local renderwidth: number = RenderDistance * 2 - 1
-		for idx: number = 0, renderwidth * renderwidth - 1 do
-			local x: number = (idx % renderwidth) - RenderDistance
-			local z: number = MathFloor(idx / renderwidth) - RenderDistance
-			local currchunkpos: vector = VecCreate(x, z) + playerchunkpos
-			local key: number = GetChunkKey(currchunkpos.x, currchunkpos.y)
-			if not UnrenderedChunks[key] then
-				continue
-			end
-			local chunk: ChunkData = UnrenderedChunks[key]
-			UnrenderedChunks[key] = nil
-			RenderedChunks[key] = chunk
-			PPT.RenderChunk(chunk, TrianglePool, Config)
-		end
-
+		
+		-- unrender chunks
 		for key: number, chunk: ChunkData in pairs(RenderedChunks) do
 			local outOfRange: boolean = vector.magnitude((chunk.ChunkPosition - playerchunkpos)) > RenderDistance
 			if not outOfRange then
@@ -408,6 +417,22 @@ function PPT.EnableClientRuntime(Tickrate: number, RenderDistance: number, Initi
 			UnrenderedChunks[key] = chunk
 			RenderedChunks[key] = nil
 		end
+
+		-- add chunks to queue
+		local renderwidth: number = RenderDistance * 2 - 1
+		for idx: number = 0, renderwidth * renderwidth - 1 do
+			local x: number = (idx % renderwidth) - RenderDistance
+			local z: number = MathFloor(idx / renderwidth) - RenderDistance
+			local currchunkpos: vector = VecCreate(x, z) + playerchunkpos
+			local key: number = GetChunkKey(currchunkpos.x, currchunkpos.y)
+			if not UnrenderedChunks[key] then continue end
+			local chunk: ChunkData = UnrenderedChunks[key]
+			local outOfRange: boolean = vector.magnitude((currchunkpos - playerchunkpos)) > RenderDistance
+			if outOfRange then continue end
+			TableInsert(QueuedChunks, chunk)
+			UnrenderedChunks[key] = nil
+		end
+
 	end)
 
 	local DisableRuntimeConnection: PTSignal
