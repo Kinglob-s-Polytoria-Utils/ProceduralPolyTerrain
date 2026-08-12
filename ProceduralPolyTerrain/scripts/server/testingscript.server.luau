@@ -10,8 +10,8 @@ local config: PPTConfig = {
 		MaximumY = math.huge, -- server only
 		MinimumY = -math.huge, -- server only
     Seed = 111, -- server only
-    ChunkSize = 72, -- shared, server controlled
-    PointInterval = 36 -- shared, server controlled
+    ChunkSize = 64, -- shared, server controlled
+    PointInterval = 32 -- shared, server controlled
 } :: PPTConfig
 local tickrate: number = 10
 

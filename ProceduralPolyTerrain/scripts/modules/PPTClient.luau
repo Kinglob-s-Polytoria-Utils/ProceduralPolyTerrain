@@ -179,6 +179,7 @@ local function ApplyVisualToTriangle(Triangle: Part): nil
 			currquery = query
 		end
 	end
+	ApplyVisual(currquery, Triangle)
 end
 
 --[[

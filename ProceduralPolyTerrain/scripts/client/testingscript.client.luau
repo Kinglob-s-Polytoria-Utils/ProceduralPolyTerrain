@@ -8,14 +8,19 @@ PPTClient.AppendTriangleVisuals({
 
 local tickrate: number = 20
 local objpoolsize: number = 4096
-local renderdist: number = 8
+local renderdist: number = 12
 
 PPTClient.EnableClientRuntime(tickrate, renderdist)
 
-for x = -16, 16 do
-    local reqs: {vector} = {}
-    for z = -16, 16 do
+for x = -64, 64 do
+    for z = -64, 64 do
+        local reqs: {vector} = {}
         reqs[#reqs + 1] = vector.create(x, z)
+        if #reqs ~= 64 then 
+            PPTClient.RequestChunks(reqs) -- takes a table of native luau vec2s
+            table.clear(reqs)
+            reqs = {}
+        end 
     end
-    PPTClient.RequestChunks(reqs) -- takes a table of native luau vec2s
 end
+print("finished requests")

@@ -104,6 +104,7 @@ function Object:Push(): (Success, Reason?)
 
 	self.Item.Position = StorePosition
 	self.InUse = false
+	if self.Item.Color ~= self.Color then self.Color = self.Item.Color end
 	self.Item.Color = StoreColor
 
 	if self.IsNPC then self.Item:Respawn() end
