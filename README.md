@@ -64,8 +64,8 @@ local ServerConfig: PPTConfig = {
     Octaves = 4,
     Persistence = 0.5,
     Lacunarity = 2,
-		MaximumY = math.huge,
-		MinimumY = -math.huge,
+	MaximumY = math.huge,
+	MinimumY = -math.huge,
     Seed = 111,
     ChunkSize = 64,
     PointInterval = 32
@@ -81,7 +81,7 @@ PPTServer.StartServerRuntime(
   
   -- Callback function to modify the Y value of chunk vertices.
   -- Think of this as a way to change the heightmap of the generated chunk(s)
-  function(noise: number): nil
+  function(noise: number): number
     return math.pow(math.abs(noise) * 1.2, 1)
   end
 )
