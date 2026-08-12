@@ -20,6 +20,14 @@ CLIENT:
 ```lua 
 -- This is a *client* script!
 local PPTClient = require(world.Hidden.PPTClient)
+
+-- Create different types of triangles to render for different heights
+PPTClient.AppendTriangleVisuals({
+	{MinHeight = 0, Color = Color.FromHex("#224f23")}, -- Grass
+	{MinHeight = 24, Color = Color.FromHex("#4d4d4d")}, -- Mountain rock
+	{MinHeight = 36, Color = Color.FromHex("#ffffff")} -- Snow
+} :: {AppendTriangleVisuals});
+
 local Tickrate: number = 20
 local RenderDistance: number = 8
 PPTClient.StartClientRuntime(Tickrate, RenderDistance)
