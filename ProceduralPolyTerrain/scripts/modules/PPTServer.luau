@@ -6,30 +6,70 @@ export type ChunkData = {
 	isRendered: boolean,
 }
 
---[[
-    Chunk size is the length of a single chunk in
-    polytoria units.
-    
-    Point interval is a value for how many points are
-		created per length units.
-
-		For example:
-		ChunkSize = 16
-		PointIntreval = 4
-		Each row will have 4 points.
---]]
 export type PPTConfig = {
-	Frequency: number, -- server
-	Amplitude: number, -- server
-	Scale: number, -- server
-	Octaves: number, -- server
-	Persistence: number, -- server
-	Lacunarity: number, -- server
-	MaximumY: number, -- server
-	MinimumY: number, -- server
+	--[[
+		Server only property.
+		How drastically / erratically the noise value
+		can change.
+	--]]
+	Frequency: number,
+	--[[
+		Server only property.
+		Intensity of the noise value.
+	--]]
+	Amplitude: number,
+	--[[
+		Server only property.
+		Multiplier added to the finishing result of the
+		noise function after normalization. Controls
+		the overall height range of the terrain.
+	--]]
+	Scale: number,
+	--[[
+		Server only property.
+		The number of times noise is layered
+		ontop of itself. Must be atleast 1.
+	--]]
+	Octaves: number,
+	--[[
+		Server only property.
+		The amount the amplitude value changes
+		every octave.
+	--]]
+	Persistence: number,
+	--[[
+		Server only property.
+		The amount the frequency value changes
+		every octave.
+	--]]
+	Lacunarity: number,
+	--[[
+		Server only property.
+		The maximum value the Y position of a vertex.
+	--]]
+	MaximumY: number,
+	--[[
+		Server only property.
+		The minimum value the Y position of a vertex.
+	--]]
+	MinimumY: number,
+	--[[
+		Server only property.
+		The seed used to generate noise.
+	--]]
 	Seed: number,
-	ChunkSize: number, -- shared
-	PointInterval: number, -- shared
+	--[[
+		Server only property, but the client can view it.
+		The size of a chunk in polytoria units.
+	--]]
+	ChunkSize: number,
+	--[[
+		Server only property, but the client can view it.
+		The amount of units that a point is placed.
+		Must be a factor of chunk size / evenly divide with it.
+		Eg; ChunkSize 16, PointInterval 4 works, but if PointInterval is 5 it'll crash.
+	--]]
+	PointInterval: number
 }
 
 local PPT = {}
@@ -89,7 +129,7 @@ local function WorldgenNoise2D(
 	local Result: number = 0
 	local MaxAmplitude: number = 0
 	for CurrOctave = 1, Octaves do
-		Result += Noise(x * Frequency, z * Frequency, Seed) * Amplitude
+		Result += Noise(x * Frequency + Seed, z * Frequency + Seed) * Amplitude
 		MaxAmplitude += Amplitude
 		Frequency *= Lacunarity
 		Amplitude *= Persistence
