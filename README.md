@@ -14,7 +14,7 @@ such as;
 - Terrain resolution
 - Encoding & Decoding of chunks to and from strings
 
-Examples of usage:
+## Usage:
 
 CLIENT:
 ```lua 
@@ -86,3 +86,7 @@ PPTServer.StartServerRuntime(
   end
 )
 ```
+
+## Preview:
+https://github.com/user-attachments/assets/65286377-d81b-4b96-a982-0939755445f7
+
